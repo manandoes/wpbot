@@ -15,7 +15,6 @@ import os
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from dotenv import load_dotenv
-from mangum import Mangum
 
 from db import init_db
 from bot.conversation import handle_message
@@ -180,8 +179,4 @@ def _run_outreach_background() -> None:
         logger.exception("Unhandled error in bulk outreach: %s", exc)
 
 
-# ---------------------------------------------------------------------------
-# Vercel / AWS Lambda serverless handler
-# ---------------------------------------------------------------------------
 
-handler = Mangum(app)

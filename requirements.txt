@@ -7,4 +7,3 @@ psycopg2-binary
 apscheduler
 python-dotenv
 pandas
-mangum
