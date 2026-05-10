@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+google-genai
+httpx
+sqlalchemy
+psycopg2-binary
+apscheduler
+python-dotenv
+pandas
