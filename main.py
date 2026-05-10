@@ -15,6 +15,7 @@ import os
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from dotenv import load_dotenv
+from mangum import Mangum
 
 from db import init_db
 from bot.conversation import handle_message
@@ -64,7 +65,11 @@ async def on_startup() -> None:
     """Initialise the DB and start the follow-up scheduler on app start."""
     logger.info("Starting up WhatsApp Sales Bot…")
     init_db()
-    start_scheduler()
+    try:
+        start_scheduler()
+    except Exception as e:
+        # APScheduler cannot run in serverless environments — skip gracefully
+        logger.warning("Scheduler skipped (serverless environment): %s", e)
     logger.info("Bot ready.")
 
 
@@ -173,3 +178,10 @@ def _run_outreach_background() -> None:
         logger.info("Outreach complete: %s", stats)
     except Exception as exc:
         logger.exception("Unhandled error in bulk outreach: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Vercel / AWS Lambda serverless handler
+# ---------------------------------------------------------------------------
+
+handler = Mangum(app)
