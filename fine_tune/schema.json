@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Arya WhatsApp Sales Consultant Fine-Tune Dataset",
+  "description": "Schema for train.jsonl (200 examples) and valid.jsonl (40 examples) used to fine-tune the Arya sales assistant model.",
+  "file_counts": {
+    "train.jsonl": 200,
+    "valid.jsonl": 40
+  },
+  "type": "object",
+  "required": ["prompt", "completion", "meta"],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "Full input string: the exact system prompt followed by a blank line and then the user's incoming WhatsApp message. Format: '<SYSTEM_PROMPT>\\n\\n<USER_MESSAGE>'",
+      "example": "You are Arya, a friendly WhatsApp Sales Consultant...\n\nHi, who is this?"
+    },
+    "completion": {
+      "type": "string",
+      "description": "The assistant's ideal reply as Arya — short, WhatsApp-friendly, warm, with light emojis. For negative examples, this intentionally demonstrates bad behavior (long paragraphs, aggression, fabricated claims).",
+      "example": "Hi! I'm Arya 😊 Reaching out about Coach Yogesh Vats' Jira with AI Masterclass — a LIVE 2-hour session at just ₹99. Curious to know more?"
+    },
+    "meta": {
+      "type": "object",
+      "description": "Metadata about the training example for filtering, analysis, and curriculum balance.",
+      "required": ["scenario", "name_present", "role_relevant", "tone", "label"],
+      "properties": {
+        "scenario": {
+          "type": "string",
+          "description": "The conversation scenario type this example belongs to.",
+          "enum": [
+            "warm_opening",
+            "qualify_yes",
+            "qualify_no",
+            "pitch",
+            "objection_is_this_worth",
+            "objection_too_busy",
+            "objection_fresher",
+            "objection_recording",
+            "objection_not_interested",
+            "follow_up",
+            "booking_confirmation"
+          ],
+          "example": "objection_recording"
+        },
+        "name_present": {
+          "type": "boolean",
+          "description": "Whether the contact's name is present/known in this example. Arya should use it if true.",
+          "example": true
+        },
+        "role_relevant": {
+          "type": "boolean",
+          "description": "Whether the contact's role is relevant to the Jira + AI Masterclass (i.e., they work in tech, PM, or Agile).",
+          "example": true
+        },
+        "tone": {
+          "type": "string",
+          "description": "The intended tone of the assistant's completion.",
+          "enum": ["friendly", "empathetic", "concise", "reassuring"],
+          "example": "reassuring"
+        },
+        "label": {
+          "type": "string",
+          "description": "Whether this is a positive (ideal) example or a negative (bad behavior) example. Negative examples teach the model what NOT to do.",
+          "enum": ["positive", "negative"],
+          "example": "positive"
+        }
+      }
+    }
+  }
+}

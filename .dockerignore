@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.git
+.gitignore
+whatsapp-web-server/
+node_modules/
+fine_tune/
+scripts/
+src/
+*.md
+contacts.csv
+trigger.config.ts

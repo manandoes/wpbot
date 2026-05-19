@@ -6,6 +6,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# Sensitive data
+contacts.csv
+*.csv
+
 # Database
 bot.db
 *.sqlite3
@@ -16,6 +20,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.egg-info/
+dist/
+build/
 
 # IDEs
 .vscode/
@@ -29,3 +36,12 @@ __pycache__/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Trigger.dev
+.trigger
+
+# WhatsApp Web server (covered by whatsapp-web-server/.gitignore but also root-level)
+whatsapp-web-server/node_modules/
+whatsapp-web-server/.wwebjs_auth/
+whatsapp-web-server/.wwebjs_cache/
+whatsapp-web-server/venv/

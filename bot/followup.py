@@ -12,15 +12,24 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from db import SessionLocal
 from db.models import Contact
-from bot.whatsapp import send_message
+from bot.whatsapp_web import send_message
 
 logger = logging.getLogger(__name__)
 
 FOLLOW_UP_DELAY_HOURS = 24
+
+# Sent to contacts who never replied to the first message
 FOLLOW_UP_TEMPLATE = (
     "Hey {name} 👋 Just checking in — did you get a chance to look at the "
     "Jira + AI Masterclass? Seats are filling up fast and it's only ₹99 😊\n"
     "👉 https://rzp.io/rzp/2-hour-live-ai-masterclass"
+)
+
+# Sent the next day to contacts who said they weren't interested
+RE_ENGAGE_TEMPLATE = (
+    "Hey {name} 👋 No pressure at all! Just leaving this here in case — "
+    "Jira with AI Masterclass, ₹99, super practical 2-hour live session. "
+    "Whenever you feel like it: https://rzp.io/rzp/2-hour-live-ai-masterclass 😊"
 )
 
 
@@ -30,17 +39,20 @@ FOLLOW_UP_TEMPLATE = (
 
 def send_followups() -> None:
     """
-    Identify contacts who:
-      - have status "first_message_sent"
-      - were last contacted more than FOLLOW_UP_DELAY_HOURS hours ago
+    Two follow-up passes per run:
 
-    Send ONE follow-up message and update their status to "follow_up_sent".
-    Never follow up more than once.
+    1. "No reply" pass — status first_message_sent, no reply for 24 h.
+       Sends a reminder and moves status to follow_up_sent.
+
+    2. "Not interested" pass — status not_interested, 24 h since last contact.
+       Sends a soft re-engagement message and moves status to follow_up_sent
+       so they are not messaged again unless they reply.
     """
     cutoff = datetime.utcnow() - timedelta(hours=FOLLOW_UP_DELAY_HOURS)
     db = SessionLocal()
     try:
-        pending = (
+        # ── Pass 1: no reply to first message ─────────────────────────────
+        no_reply = (
             db.query(Contact)
             .filter(
                 Contact.status == "first_message_sent",
@@ -48,24 +60,40 @@ def send_followups() -> None:
             )
             .all()
         )
+        logger.info("Follow-up job (no reply): %d contacts.", len(no_reply))
 
-        logger.info("Follow-up job: found %d contacts to follow up with.", len(pending))
-
-        for contact in pending:
+        for contact in no_reply:
             name = contact.name.split()[0] if contact.name else "there"
-            message = FOLLOW_UP_TEMPLATE.format(name=name)
-
-            success = send_message(contact.phone_number, message)
+            success = send_message(contact.phone_number, FOLLOW_UP_TEMPLATE.format(name=name))
             if success:
                 contact.status = "follow_up_sent"
                 contact.last_contacted_at = datetime.utcnow()
                 db.commit()
-                logger.info("Follow-up sent to %s.", contact.phone_number)
+                logger.info("Follow-up (no reply) sent to %s.", contact.phone_number)
             else:
-                logger.warning(
-                    "Failed to send follow-up to %s — will retry next cycle.",
-                    contact.phone_number,
-                )
+                logger.warning("Failed follow-up (no reply) to %s.", contact.phone_number)
+
+        # ── Pass 2: said not interested — re-engage next day ──────────────
+        not_interested = (
+            db.query(Contact)
+            .filter(
+                Contact.status == "not_interested",
+                Contact.last_contacted_at <= cutoff,
+            )
+            .all()
+        )
+        logger.info("Follow-up job (not interested): %d contacts.", len(not_interested))
+
+        for contact in not_interested:
+            name = contact.name.split()[0] if contact.name else "there"
+            success = send_message(contact.phone_number, RE_ENGAGE_TEMPLATE.format(name=name))
+            if success:
+                contact.status = "follow_up_sent"
+                contact.last_contacted_at = datetime.utcnow()
+                db.commit()
+                logger.info("Re-engage follow-up sent to %s.", contact.phone_number)
+            else:
+                logger.warning("Failed re-engage follow-up to %s.", contact.phone_number)
 
     except Exception as exc:
         logger.exception("Error in send_followups job: %s", exc)

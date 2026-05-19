@@ -44,6 +44,6 @@ def get_db():
 
 def init_db():
     """Create all tables in the Supabase database if they don't exist."""
-    from db.models import Contact, Conversation  # noqa: F401
+    from db.models import Contact, Conversation, Registration  # noqa: F401
     Base.metadata.create_all(bind=engine)
     logger.info("Supabase tables created / verified.")

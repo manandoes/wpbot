@@ -1,6 +1,6 @@
-# WhatsApp Sales Bot — Jira with AI Masterclass 🚀
+# WhatsApp Sales Bot — Jira with AI Masterclass
 
-An outbound WhatsApp chatbot powered by **Meta WhatsApp Business Cloud API** and **Google Gemini AI (gemini-2.0-flash)** that proactively reaches out to cold contacts, qualifies them, pitches the ₹99 *Jira with AI Masterclass* by Coach Yogesh Vats, handles objections, and drives bookings.
+An outbound WhatsApp chatbot powered by **whatsapp-web.js** (Node.js) and **Google Gemini AI (gemini-2.0-flash)**. It proactively reaches out to cold contacts, qualifies them, pitches the ₹99 *Jira with AI Masterclass* by Coach Yogesh Vats, handles objections, and drives bookings.
 
 ---
 
@@ -8,23 +8,33 @@ An outbound WhatsApp chatbot powered by **Meta WhatsApp Business Cloud API** and
 
 ```
 wpbot/
-├── main.py                  # FastAPI app, webhook receiver
+├── main.py                        # FastAPI app, webhook receiver
 ├── bot/
-│   ├── __init__.py
-│   ├── gemini_agent.py      # Gemini AI integration (Arya persona)
-│   ├── whatsapp.py          # Meta Cloud API: send & parse messages
-│   ├── conversation.py      # Conversation state management
-│   └── followup.py          # 24-hour follow-up scheduler
+│   ├── gemini_agent.py            # Gemini AI integration (Arya persona)
+│   ├── whatsapp_web.py            # Communicates with Node.js whatsapp-web.js server
+│   ├── conversation.py            # Conversation state management
+│   ├── followup.py                # 24-hour follow-up scheduler
+│   └── __init__.py
 ├── db/
-│   ├── __init__.py
-│   └── models.py            # SQLAlchemy models: Contact, Conversation
+│   ├── models.py                  # SQLAlchemy: Contact, Conversation, Registration
+│   └── __init__.py                # DB engine, session factory
 ├── outreach/
-│   ├── __init__.py
-│   └── bulk_sender.py       # Load contacts.csv and send first message
-├── contacts.csv             # Your contact list: name, phone_number
-├── .env                     # API keys (never commit this!)
+│   ├── bulk_sender.py             # Reads contacts.csv, sends initial messages
+│   └── __init__.py
+├── fine_tune/                     # Gemini fine-tuning scripts and data
+├── scripts/
+│   ├── send_test_incoming.py      # Simulate an incoming webhook message
+│   └── test_integration.py       # End-to-end integration health check
+├── whatsapp-web-server/           # Node.js server running whatsapp-web.js
+│   ├── server.js
+│   └── package.json
+├── src/trigger/                   # Trigger.dev task definitions
+├── contacts.csv                   # Contact list (gitignored — never commit)
+├── .env                           # API keys (gitignored — never commit)
+├── .env.example                   # Template for environment variables
 ├── requirements.txt
-└── README.md
+├── vercel.json
+└── trigger.config.ts
 ```
 
 ---
@@ -32,75 +42,51 @@ wpbot/
 ## Prerequisites
 
 - Python 3.11+
-- A **Meta WhatsApp Business** account with Cloud API access
-- A **Google Gemini API key**
-- A publicly accessible HTTPS URL for the webhook (use [ngrok](https://ngrok.com/) for local dev)
+- Node.js 18+
+- PostgreSQL database
+- Google Gemini API key
 
 ---
 
 ## Setup
 
-### 1. Clone and install dependencies
+### 1. Install Python dependencies
 
 ```bash
-cd wpbot
 python -m venv venv
-
 # Windows
 venv\Scripts\activate
-
 # macOS / Linux
 source venv/bin/activate
 
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment variables
-
-Copy `.env` and fill in your credentials:
+### 2. Install Node.js dependencies
 
 ```bash
-# .env
-WHATSAPP_TOKEN=your_meta_whatsapp_api_token
-WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
-WHATSAPP_VERIFY_TOKEN=any_secret_string_you_choose
-GEMINI_API_KEY=your_google_gemini_api_key
-DATABASE_URL=sqlite:///./bot.db
+cd whatsapp-web-server
+npm install
 ```
 
-### 3. Get a Gemini API key
+### 3. Configure environment variables
 
-1. Visit [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
-2. Sign in with your Google account
-3. Click **Create API Key**
-4. Copy and paste it into `.env` as `GEMINI_API_KEY`
+```bash
+cp .env.example .env
+# Fill in your values in .env
+```
 
-### 4. Get Meta WhatsApp Business API credentials
+Required variables:
 
-1. Go to [developers.facebook.com](https://developers.facebook.com) and create a new App (Business type)
-2. Add the **WhatsApp** product to your app
-3. Under **WhatsApp → Getting Started**, find your:
-   - **Temporary Access Token** → `WHATSAPP_TOKEN`
-   - **Phone Number ID** → `WHATSAPP_PHONE_NUMBER_ID`
-4. For production, generate a **Permanent System User Token** via Business Manager
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `WHATSAPP_WEB_SERVER_URL` | URL of the Node.js server (default: `http://localhost:3000`) |
 
-### 5. Configure the webhook
+### 4. Prepare contacts
 
-1. Start the bot: `uvicorn main:app --reload --port 8000`
-2. Expose it publicly with ngrok:
-   ```bash
-   ngrok http 8000
-   ```
-3. Copy the ngrok HTTPS URL (e.g., `https://abc123.ngrok.io`)
-4. In your Meta App Dashboard → **WhatsApp → Configuration**:
-   - **Callback URL**: `https://abc123.ngrok.io/webhook`
-   - **Verify Token**: the value you set as `WHATSAPP_VERIFY_TOKEN` in `.env`
-   - Subscribe to the **messages** webhook field
-5. Click **Verify and Save** — Meta will call your `GET /webhook` endpoint
-
-### 6. Prepare your contacts
-
-Edit `contacts.csv`:
+Create `contacts.csv` (gitignored):
 
 ```csv
 name,phone_number
@@ -108,81 +94,90 @@ Ravi Sharma,919876543210
 Priya Mehta,919812345678
 ```
 
-> **Phone number format**: country code + number, no `+` or spaces (e.g., `919876543210` for India).
+> Phone number format: country code + number, no `+` or spaces (e.g. `919876543210` for India).
 
-### 7. Run the bot
+---
 
+## Running the Bot
+
+Start both servers — they must run simultaneously:
+
+**Terminal 1 — Node.js WhatsApp Web server:**
 ```bash
-uvicorn main:app --reload
+cd whatsapp-web-server && npm start
 ```
 
-### 8. Trigger bulk outreach
+On first run, scan the QR code printed to console with WhatsApp on your phone.
 
+**Terminal 2 — Python FastAPI server:**
 ```bash
-curl -X POST http://localhost:8000/outreach/start
+uvicorn main:app --reload --port 8000
 ```
-
-Or open `http://localhost:8000/docs` and call `POST /outreach/start` from the Swagger UI.
 
 ---
 
 ## API Endpoints
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/webhook` | Meta webhook verification challenge |
-| `POST` | `/webhook` | Receive incoming WhatsApp messages |
-| `POST` | `/outreach/start` | Trigger bulk outreach from CSV |
+|---|---|---|
 | `GET` | `/health` | Health check |
+| `GET` | `/whatsapp/status` | WhatsApp Web client status |
+| `GET` | `/whatsapp/qr` | Get QR code for authentication |
+| `POST` | `/webhook/whatsapp-web` | Receive messages from Node.js server |
+| `POST` | `/outreach/start` | Trigger bulk outreach from contacts.csv |
+| `DELETE` | `/contact/{phone}/reset` | Reset a contact's conversation history |
 | `GET` | `/docs` | Interactive API docs (Swagger UI) |
+
+### Trigger bulk outreach
+
+```bash
+curl -X POST http://localhost:8000/outreach/start
+```
 
 ---
 
 ## How It Works
 
 ```
-Outreach CSV → bulk_sender.py → send first WhatsApp message → Contact saved as "first_message_sent"
-                                                                      │
-                                                              24 hours with no reply?
-                                                                      │
-                                                              followup.py sends ONE follow-up
-                                                                      │
-Contact replies → /webhook POST → parse_incoming() → BackgroundTask → conversation.py
-                                                                            │
-                                                               Load history from DB
-                                                                            │
+contacts.csv → bulk_sender.py → sends first WhatsApp message → Contact: "first_message_sent"
+                                                                        │
+                                                               24 hours, no reply?
+                                                                        │
+                                                               followup.py sends follow-up
+                                                                        │
+Contact replies → Node.js webhook → POST /webhook/whatsapp-web → BackgroundTask
+                                                                        │
+                                                               handle_message() loads history
+                                                                        │
                                                                Gemini (Arya persona) generates reply
-                                                                            │
-                                                               Save to DB, update status
-                                                                            │
-                                                               send_message() → WhatsApp
+                                                                        │
+                                                               Reply saved to DB + sent via WhatsApp
 ```
 
-## Contact Status Flow
+### Contact Status Flow
 
 ```
 not_contacted → first_message_sent → in_conversation → booked
-                         ↓                                ↓
-                  follow_up_sent                  not_interested
+                        ↓                    ↓
+                 follow_up_sent        not_interested
 ```
 
 ---
 
-## Important Notes
+## Development Scripts
 
-- ⚠️ **WhatsApp policy**: First outbound messages to users who haven't messaged you must use Meta-approved **Message Templates**. Free-form text is only allowed within a 24-hour window after a user messages you. For cold outreach, submit a template to Meta for approval first.
-- 🔑 **Never commit `.env`** — add it to `.gitignore`
-- 📝 Logs are written to stdout — pipe to a file or use a log aggregator in production
-- 🔄 The follow-up scheduler runs in-process. For production, consider Celery + Redis or a dedicated task queue.
+```bash
+# Simulate an incoming message (bot must be running)
+python scripts/send_test_incoming.py 919876543210 "Hi, I'm interested"
+
+# Run end-to-end integration health check
+python scripts/test_integration.py
+```
 
 ---
 
-## Environment Variables Reference
+## Notes
 
-| Variable | Description |
-|----------|-------------|
-| `WHATSAPP_TOKEN` | Meta WhatsApp Cloud API bearer token |
-| `WHATSAPP_PHONE_NUMBER_ID` | Your WhatsApp Business phone number ID |
-| `WHATSAPP_VERIFY_TOKEN` | Custom secret string for webhook verification |
-| `GEMINI_API_KEY` | Google Gemini API key from AI Studio |
-| `DATABASE_URL` | SQLAlchemy DB URL (default: `sqlite:///./bot.db`) |
+- Webhook must return `200 OK` within 3 seconds — Gemini calls are offloaded to `BackgroundTasks`
+- The follow-up scheduler uses APScheduler — it will skip gracefully in serverless environments
+- `contacts.csv` is gitignored because it contains real phone numbers

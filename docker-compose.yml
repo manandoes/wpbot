@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  whatsapp-node:
+    build: ./whatsapp-web-server
+    container_name: wpbot-node
+    restart: unless-stopped
+    shm_size: '256mb'          # Chromium needs shared memory
+    ports:
+      - "3000:3000"
+    environment:
+      - PYTHON_API_URL=http://python-api:8000
+      - WHATSAPP_WEB_PORT=3000
+    volumes:
+      - whatsapp-session:/app/.wwebjs_auth    # Persist WhatsApp auth across restarts
+    networks:
+      - wpbot-network
+
+  python-api:
+    build: .
+    container_name: wpbot-python
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - WHATSAPP_WEB_SERVER_URL=http://whatsapp-node:3000
+    depends_on:
+      - whatsapp-node
+    networks:
+      - wpbot-network
+
+volumes:
+  whatsapp-session:
+
+networks:
+  wpbot-network:
+    driver: bridge

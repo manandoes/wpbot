@@ -1,0 +1,62 @@
+======================================================
+  ARYA FINE-TUNE DATASET — EXAMPLES SUMMARY
+======================================================
+
+FILE: train.jsonl
+Total examples: 200
+
+--- Scenario Distribution ---
+  booking_confirmation                 12
+  follow_up                             5
+  objection_fresher                    10
+  objection_is_this_worth              24
+  objection_not_interested             17
+  objection_recording                  15
+  objection_too_busy                    9
+  pitch                                44
+  qualify_no                            7
+  qualify_yes                          23
+  warm_opening                         34
+
+--- Label Distribution ---
+  positive:  161  (80.5%)
+  negative:   39  (19.5%)
+
+------------------------------------------------------
+
+FILE: valid.jsonl
+Total examples: 40
+
+--- Scenario Distribution ---
+  booking_confirmation                  5
+  follow_up                             2
+  objection_fresher                     2
+  objection_is_this_worth               5
+  objection_not_interested              2
+  objection_recording                   4
+  objection_too_busy                    2
+  pitch                                 5
+  qualify_no                            3
+  qualify_yes                           3
+  warm_opening                          7
+
+--- Label Distribution ---
+  positive:   31  (77.5%)
+  negative:    9  (22.5%)
+
+======================================================
+
+NOTES:
+- Negative examples (~20% in both splits) demonstrate bad behavior:
+    * Excessively long paragraphs
+    * Aggressive or fear-based sales tactics
+    * Fabricated product details (fake certificates, recordings, placements)
+    * Multiple questions at once
+    * Invented coach credentials beyond the system prompt
+- Positive examples demonstrate ideal Arya behavior:
+    * Short, warm, WhatsApp-friendly replies
+    * Light emoji use (😊✅🚀)
+    * Single question at a time
+    * Graceful disengagement when contact is uninterested
+    * Accurate facts only, deferred to team when uncertain
+======================================================

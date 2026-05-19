@@ -14,7 +14,7 @@ import pandas as pd
 
 from db import SessionLocal
 from db.models import Contact
-from bot.whatsapp import send_message
+from bot.conversation import initiate_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -88,24 +88,10 @@ def run_bulk_outreach() -> dict:
             else:
                 message = FIRST_MESSAGE_NO_NAME
 
-            # ── Send message ───────────────────────────────────────────────
-            success = send_message(phone, message)
+            # ── Send message via conversation helper (persists history)
+            sent = initiate_conversation(phone, name=name)
 
-            if success:
-                # ── Upsert contact record ──────────────────────────────────
-                if existing:
-                    existing.name = name or existing.name
-                    existing.status = "first_message_sent"
-                    existing.last_contacted_at = datetime.utcnow()
-                else:
-                    new_contact = Contact(
-                        name=name,
-                        phone_number=phone,
-                        status="first_message_sent",
-                        last_contacted_at=datetime.utcnow(),
-                    )
-                    db.add(new_contact)
-                db.commit()
+            if sent:
                 stats["sent"] += 1
                 logger.info("First message sent to %s (%s).", phone, name or "unknown")
             else:

@@ -32,6 +32,27 @@ class Contact(Base):
         return f"<Contact phone={self.phone_number} status={self.status}>"
 
 
+class Registration(Base):
+    """
+    Tracks registration details collected after a user confirms booking.
+
+    Stage flow:
+        awaiting_name → awaiting_email → awaiting_payment → complete
+    """
+
+    __tablename__ = "registrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    phone_number = Column(String(20), unique=True, index=True, nullable=False)
+    reg_stage = Column(String(30), default="awaiting_name", nullable=False)
+    reg_name = Column(String(255), nullable=True)
+    reg_email = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<Registration phone={self.phone_number} stage={self.reg_stage}>"
+
+
 class Conversation(Base):
     """
     Stores the full chat history for each contact.

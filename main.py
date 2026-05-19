@@ -1,24 +1,28 @@
 """
-main.py
+main.py - UPDATED FOR WHATSAPP-WEB.JS INTEGRATION
 FastAPI application — entry point for the WhatsApp sales bot.
 
+This version uses whatsapp-web.js (Node.js) instead of Meta Cloud API.
+
 Endpoints:
-  GET  /webhook          → Meta webhook verification challenge
-  POST /webhook          → Incoming WhatsApp messages
-  POST /outreach/start   → Trigger bulk outreach from contacts.csv
-  GET  /health           → Health check
+  GET  /health                       → Health check
+  GET  /whatsapp/status              → WhatsApp Web client status
+  GET  /whatsapp/qr                  → Get QR code for authentication
+  POST /webhook/whatsapp-web         → Receive messages from Node.js server
+  POST /outreach/start               → Trigger bulk outreach from contacts.csv
 """
 
 import logging
 import os
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
-from db import init_db
+from db import init_db, SessionLocal
+from db.models import Contact, Conversation, Registration
 from bot.conversation import handle_message
-from bot.whatsapp import parse_incoming
+from bot.whatsapp_web import parse_incoming, get_client_status, get_qr_code
 from bot.followup import start_scheduler, stop_scheduler
 from outreach.bulk_sender import run_bulk_outreach
 
@@ -39,19 +43,17 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
-
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="WhatsApp Sales Bot — Jira with AI Masterclass",
+    title="WhatsApp Sales Bot — Jira with AI Masterclass (WhatsApp Web Edition)",
     description=(
-        "Outbound WhatsApp chatbot powered by Meta Cloud API + Google Gemini AI "
+        "Outbound WhatsApp chatbot powered by whatsapp-web.js + Google Gemini AI "
         "for promoting Coach Yogesh Vats' Jira with AI Masterclass."
     ),
-    version="1.0.0",
+    version="2.0.0",
 )
 
 
@@ -62,13 +64,21 @@ app = FastAPI(
 @app.on_event("startup")
 async def on_startup() -> None:
     """Initialise the DB and start the follow-up scheduler on app start."""
-    logger.info("Starting up WhatsApp Sales Bot…")
+    logger.info("Starting up WhatsApp Sales Bot (WhatsApp Web Edition)…")
     init_db()
     try:
         start_scheduler()
     except Exception as e:
         # APScheduler cannot run in serverless environments — skip gracefully
         logger.warning("Scheduler skipped (serverless environment): %s", e)
+    
+    # Check WhatsApp Web client status
+    status = get_client_status()
+    if status.get("ready"):
+        logger.info("✅ WhatsApp Web client is ready: %s", status.get("phone_number"))
+    else:
+        logger.warning("⚠️  WhatsApp Web client not ready. Please scan QR code.")
+    
     logger.info("Bot ready.")
 
 
@@ -80,76 +90,107 @@ async def on_shutdown() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Routes — Health & Status
 # ---------------------------------------------------------------------------
 
 @app.get("/health", tags=["Utility"])
 async def health_check():
     """Simple health check endpoint."""
-    return {"status": "ok", "service": "whatsapp-sales-bot"}
+    return {"status": "ok", "service": "whatsapp-sales-bot-web"}
 
 
-# ── Webhook verification (GET) ──────────────────────────────────────────────
+@app.get("/whatsapp/status", tags=["WhatsApp"])
+async def whatsapp_status():
+    """Get WhatsApp Web client status."""
+    status = get_client_status()
+    
+    if not status.get("ready"):
+        qr = get_qr_code()
+        if qr:
+            logger.info("QR code available for scanning")
+            return {
+                **status,
+                "message": "Please scan the QR code to authenticate",
+                "qr_available": True,
+            }
+    
+    return status
 
-@app.get("/webhook", tags=["WhatsApp"])
-async def verify_webhook(
-    hub_mode: str = Query(None, alias="hub.mode"),
-    hub_verify_token: str = Query(None, alias="hub.verify_token"),
-    hub_challenge: str = Query(None, alias="hub.challenge"),
-):
+
+@app.get("/whatsapp/qr", tags=["WhatsApp"])
+async def get_qr():
     """
-    Meta webhook verification handshake.
-    Meta sends: hub.mode=subscribe, hub.verify_token, hub.challenge
-    We must return hub.challenge as plain text if the token matches.
+    Get QR code for WhatsApp Web authentication.
+    
+    Use this endpoint to retrieve the QR code if authentication is pending.
     """
-    logger.info("Webhook verification request received. mode=%s", hub_mode)
+    qr = get_qr_code()
+    
+    if not qr:
+        return JSONResponse(
+            content={
+                "success": False,
+                "message": "No QR code pending. Client may already be authenticated.",
+            },
+            status_code=400,
+        )
+    
+    return {
+        "success": True,
+        "qr": qr,
+        "instructions": "Scan this QR code with WhatsApp to authenticate the bot.",
+    }
 
-    if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
-        logger.info("Webhook verified successfully.")
-        return PlainTextResponse(content=hub_challenge, status_code=200)
 
-    logger.warning(
-        "Webhook verification failed. token_match=%s",
-        hub_verify_token == VERIFY_TOKEN,
-    )
-    raise HTTPException(status_code=403, detail="Verification token mismatch.")
+# ---------------------------------------------------------------------------
+# Routes — Webhooks
+# ---------------------------------------------------------------------------
 
-
-# ── Incoming messages (POST) ────────────────────────────────────────────────
-
-@app.post("/webhook", tags=["WhatsApp"])
-async def receive_message(request: Request, background_tasks: BackgroundTasks):
+@app.post("/webhook/whatsapp-web", tags=["WhatsApp"])
+async def receive_message_from_web(request: Request, background_tasks: BackgroundTasks):
     """
-    Receive incoming WhatsApp messages from Meta.
+    Receive incoming WhatsApp messages from the Node.js whatsapp-web.js server.
 
     IMPORTANT: Must return 200 OK within 3 seconds.
     All heavy work (Gemini call + reply) is offloaded to BackgroundTasks.
     """
     try:
         payload = await request.json()
-    except Exception:
-        logger.warning("Received non-JSON webhook payload — ignoring.")
+    except Exception as e:
+        logger.warning("Received non-JSON webhook payload: %s", e)
         return JSONResponse(content={"status": "ignored"}, status_code=200)
 
     # ── Parse the incoming message ─────────────────────────────────────────
     parsed = parse_incoming(payload)
 
     if parsed is None:
-        # Status updates, delivery receipts, unsupported types → ignore silently
+        logger.debug("Ignoring unparseable message: %s", payload)
         return JSONResponse(content={"status": "ignored"}, status_code=200)
 
     phone_number = parsed["phone_number"]
     message_text = parsed["message_text"]
+    contact_name = parsed.get("contact_name", phone_number)
+    has_media = parsed.get("has_media", False)
+    media_data = parsed.get("media_data", "")
+    media_mimetype = parsed.get("media_mimetype", "")
 
-    logger.info("Incoming message from %s: %.80s", phone_number, message_text)
+    logger.info(
+        "Incoming message from %s (%s): %.80s%s",
+        contact_name,
+        phone_number,
+        message_text,
+        " [+media]" if has_media else "",
+    )
 
     # ── Queue reply in background (keeps response time < 3s) ──────────────
-    background_tasks.add_task(handle_message, phone_number, message_text)
+    background_tasks.add_task(handle_message, phone_number, message_text, has_media, media_data, media_mimetype)
 
     return JSONResponse(content={"status": "received"}, status_code=200)
 
 
-# ── Outreach trigger ────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Routes — Outreach
+# ---------------------------------------------------------------------------
 
 @app.post("/outreach/start", tags=["Outreach"])
 async def start_outreach(background_tasks: BackgroundTasks):
@@ -170,6 +211,45 @@ async def start_outreach(background_tasks: BackgroundTasks):
     )
 
 
+@app.delete("/contact/{phone_number}/reset", tags=["Utility"])
+async def reset_contact(phone_number: str):
+    """
+    Delete all conversation history for a phone number and reset their status to not_contacted.
+
+    This clears:
+    - All messages in the conversations table
+    - Any in-progress registration
+    - Resets contact status to 'not_contacted'
+
+    The bot will treat the user as a fresh contact on their next message.
+    """
+    db = SessionLocal()
+    try:
+        conversations_deleted = db.query(Conversation).filter(Conversation.phone_number == phone_number).delete()
+        registrations_deleted = db.query(Registration).filter(Registration.phone_number == phone_number).delete()
+
+        contact = db.query(Contact).filter(Contact.phone_number == phone_number).first()
+        if contact:
+            contact.status = "not_contacted"
+
+        db.commit()
+        logger.info("Reset contact %s: deleted %d messages, %d registrations", phone_number, conversations_deleted, registrations_deleted)
+
+        return {
+            "success": True,
+            "phone_number": phone_number,
+            "conversations_deleted": conversations_deleted,
+            "registrations_deleted": registrations_deleted,
+            "contact_status": "not_contacted" if contact else "not_found",
+        }
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Error resetting contact %s: %s", phone_number, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to reset contact: {exc}")
+    finally:
+        db.close()
+
+
 def _run_outreach_background() -> None:
     """Wrapper so bulk outreach errors are caught and logged."""
     try:
@@ -177,6 +257,3 @@ def _run_outreach_background() -> None:
         logger.info("Outreach complete: %s", stats)
     except Exception as exc:
         logger.exception("Unhandled error in bulk outreach: %s", exc)
-
-
-

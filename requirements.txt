@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-google-genai
+openai
 httpx
 sqlalchemy
 psycopg2-binary
