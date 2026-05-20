@@ -137,12 +137,12 @@ gcloud compute ssh "$INSTANCE" \
 
 # ── 6. Copy .env to the VM ────────────────────────────────────────────────────
 echo "🔑  Copying .env to VM..."
-# Copy to home dir first (pscp on Windows can't handle ~/subdir as destination)
-gcloud compute scp .env "$INSTANCE":~/.env_wpbot_tmp \
+# Use /tmp/ — pscp on Windows can't expand ~ in remote paths
+gcloud compute scp .env "$INSTANCE":/tmp/wpbot_env \
     --zone="$ZONE" --project="$PROJECT"
 gcloud compute ssh "$INSTANCE" \
     --zone="$ZONE" --project="$PROJECT" \
-    --command="mv ~/.env_wpbot_tmp ~/wpbot/.env"
+    --command="mv /tmp/wpbot_env ~/wpbot/.env"
 
 # ── 7. Run deploy.sh on the VM ───────────────────────────────────────────────
 echo "🚀  Running deploy.sh on VM..."
