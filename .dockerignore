@@ -1,15 +1,44 @@
+# Python artifacts
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
+
+# Secrets and local config
 .env
+*.env.local
+
+# Version control
 .git
 .gitignore
+
+# Dev tooling
+.vscode/
+.idea/
+.trigger/
+.claude/
+
+# Data files
+contacts.csv
+*.csv
+*.db
+*.sqlite3
+
+# Docs and non-runtime files
+*.md
+trigger.config.ts
+Commands.md
+
+# Dashboard node_modules (built in nginx/Dockerfile, not needed here)
+dashboard/node_modules/
+dashboard/.env
+dashboard/dist/
+
+# WhatsApp server (has its own Docker context)
 whatsapp-web-server/
-node_modules/
+
+# Fine-tuning scripts
 fine_tune/
 scripts/
 src/
-*.md
-contacts.csv
-trigger.config.ts

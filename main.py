@@ -16,6 +16,7 @@ import logging
 import os
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
@@ -25,6 +26,7 @@ from bot.conversation import handle_message
 from bot.whatsapp_web import parse_incoming, get_client_status, get_qr_code
 from bot.followup import start_scheduler, stop_scheduler
 from outreach.bulk_sender import run_bulk_outreach
+from admin.routes import router as admin_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -55,6 +57,21 @@ app = FastAPI(
     ),
     version="2.0.0",
 )
+
+_cors_origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000",
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(admin_router, prefix="/admin")
 
 
 # ---------------------------------------------------------------------------

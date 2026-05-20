@@ -177,7 +177,7 @@ def handle_message(
         _save_message(db, phone_number, role="user", message=incoming_text)
 
         # ── Generate Gemini reply ──────────────────────────────────────────
-        reply = gemini_agent.get_reply(history, incoming_text)
+        reply = gemini_agent.get_reply(history, incoming_text, contact_status=contact.status)
 
         # ── Detect signals ─────────────────────────────────────────────────
         mark_not_interested = _DONE_SIGNAL in reply
@@ -271,13 +271,13 @@ def initiate_conversation(phone_number: str, name: str = "") -> bool:
         first_name = name.split()[0] if name else ""
         if first_name:
             message = (
-                f"Hello {first_name}, I'm Arya from Coach Yogesh Vats' team. "
-                "I hope you're doing well. May I ask — do you work with Jira or any project management tools in your current role?"
+                f"Hi {first_name}, Yogesh Vats here. "
+                "Quick question — do you currently use JIRA in your work for tasks, sprints, or project tracking?"
             )
         else:
             message = (
-                "Hello, I'm Arya from Coach Yogesh Vats' team. "
-                "I hope you're doing well. May I ask — do you work with Jira or any project management tools in your current role?"
+                "Hi, Yogesh Vats here. "
+                "Quick question — do you currently use JIRA in your work for tasks, sprints, or project tracking?"
             )
 
         sent = False

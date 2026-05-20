@@ -15,18 +15,38 @@ import json
 import sys
 from collections import Counter
 
-SYSTEM_PROMPT_START = "You are Arya, a friendly WhatsApp Sales Consultant for Coach Yogesh Vats' Jira with AI Masterclass."
+SYSTEM_PROMPT_PREFIXES = (
+    # original cold-lead Arya prompt
+    "You are Arya, a friendly WhatsApp Sales Consultant for Coach Yogesh Vats' Jira with AI Masterclass.",
+    # interested-lead personal Yogesh prompt
+    "You are replying as Coach Yogesh Vats from his personal WhatsApp number. This lead has ALREADY shown interest",
+    # cold-lead personal Yogesh prompt
+    "You are replying as Coach Yogesh Vats from his personal WhatsApp number.",
+)
 
 REQUIRED_KEYS = {"prompt", "completion", "meta"}
 REQUIRED_META_KEYS = {"scenario", "name_present", "role_relevant", "tone", "label"}
 
 VALID_SCENARIOS = {
+    # original scenarios
     "warm_opening", "qualify_yes", "qualify_no", "pitch",
     "objection_is_this_worth", "objection_too_busy", "objection_fresher",
     "objection_recording", "objection_not_interested", "follow_up",
-    "booking_confirmation"
+    "booking_confirmation",
+    # interested-lead scenarios
+    "interested_confirm_yes", "interested_sounds_good", "interested_share_link",
+    "interested_what_covered", "interested_warm_not_paid", "interested_payment_failed",
+    "interested_payment_retry_ack", "interested_is_it_worth", "interested_close_after_value",
+    "interested_register_later", "interested_what_will_learn", "interested_how_to_join",
+    "interested_recording", "interested_what_time", "interested_follow_up",
+    "interested_no_jira",
+    # cold-lead personal scenarios
+    "cold_qualify_pain_point", "cold_pain_confirmed", "cold_pitch_close",
+    "cold_share_link", "cold_who_is_this", "cold_qualify_yes", "cold_send_details",
+    "cold_what_covered", "cold_beginner_friendly", "cold_close",
+    "cold_not_interested", "cold_where_number", "cold_opening",
 }
-VALID_TONES = {"friendly", "empathetic", "concise", "reassuring"}
+VALID_TONES = {"friendly", "empathetic", "concise", "reassuring", "pushy"}
 VALID_LABELS = {"positive", "negative"}
 
 
@@ -63,10 +83,10 @@ def validate_file(filepath: str) -> bool:
             errors.append(f"Line {i}: Missing top-level keys: {missing_keys}")
             continue
 
-        # 3. prompt starts with system prompt
+        # 3. prompt starts with a known system prompt
         prompt = obj.get("prompt", "")
-        if not isinstance(prompt, str) or not prompt.startswith(SYSTEM_PROMPT_START):
-            errors.append(f"Line {i}: 'prompt' does not start with the required system prompt.")
+        if not isinstance(prompt, str) or not any(prompt.startswith(p) for p in SYSTEM_PROMPT_PREFIXES):
+            errors.append(f"Line {i}: 'prompt' does not start with a recognised system prompt.")
 
         # 4. completion is non-empty string
         completion = obj.get("completion", "")
@@ -116,7 +136,8 @@ def validate_file(filepath: str) -> bool:
     print(f"\n--- Scenario Distribution ---")
     for scenario in sorted(VALID_SCENARIOS):
         count = scenario_counts.get(scenario, 0)
-        print(f"  {scenario:<35} {count}")
+        if count:
+            print(f"  {scenario:<40} {count}")
 
     negative_count = label_counts.get("negative", 0)
     positive_count = label_counts.get("positive", 0)
@@ -134,7 +155,7 @@ def validate_file(filepath: str) -> bool:
         print(f"{'='*50}\n")
         return False
 
-    print(f"\n✅ All {total} examples passed validation.")
+    print(f"\nPASSED: All {total} examples passed validation.")
     print(f"{'='*50}\n")
     return True
 
