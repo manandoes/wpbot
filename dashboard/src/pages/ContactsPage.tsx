@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { getContacts } from '../api/contacts'
 import type { ContactItem } from '../api/contacts'
 import { updateContactStatus } from '../api/messaging'
-import StatusBadge from '../components/StatusBadge'
 
 const STATUSES = [
   '', 'not_contacted', 'first_message_sent', 'in_conversation',

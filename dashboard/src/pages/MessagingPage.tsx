@@ -4,10 +4,6 @@ import type { BulkContact, BulkSendResultItem } from '../api/messaging'
 
 type Tab = 'single' | 'bulk'
 
-const ALL_STATUSES = [
-  'not_contacted', 'first_message_sent', 'in_conversation',
-  'follow_up_sent', 'booked', 'not_interested',
-]
 
 function parseContactsText(raw: string): BulkContact[] {
   return raw
