@@ -1,31 +1,11 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-wpbot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-wpbot}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wpbot} -d ${POSTGRES_DB:-wpbot}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - internal
-
   python-api:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-wpbot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wpbot}
+      DATABASE_URL: ${DATABASE_URL}
       NVIDIA_API_KEY: ${NVIDIA_API_KEY}
       WHATSAPP_WEB_SERVER_URL: http://whatsapp-server:3000
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
@@ -69,7 +49,6 @@ services:
       - internal
 
 volumes:
-  postgres_data:
   whatsapp_session:
   whatsapp_cache:
 
