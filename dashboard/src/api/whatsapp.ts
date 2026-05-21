@@ -17,5 +17,6 @@ export const getWhatsAppStatus = () =>
 export const getQR = () =>
   client.get<QRData>('/admin/whatsapp/qr')
 
-export const restartSession = () =>
-  client.post<{ success: boolean; message?: string }>('/admin/whatsapp/restart-session')
+export const reconnectWhatsApp = () =>
+  client.post<{ success: boolean; message: string }>('/admin/whatsapp/reconnect')
+

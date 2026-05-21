@@ -46,23 +46,11 @@ def get_client_status() -> dict:
         }
 
 
-def restart_session() -> dict:
-    """
-    Wipe the WhatsApp session on the Node.js server and force a fresh QR.
-    """
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.post(f"{WHATSAPP_WEB_SERVER_URL}/restart-session")
-            return response.json()
-    except Exception as exc:
-        logger.error("Failed to restart WhatsApp session: %s", exc)
-        return {"success": False, "error": str(exc)}
-
 
 def get_qr_code() -> Optional[str]:
     """
     Get the QR code for scanning if not authenticated.
-    
+
     Returns:
         QR code string if pending, None otherwise.
     """
@@ -76,6 +64,21 @@ def get_qr_code() -> Optional[str]:
     except Exception as exc:
         logger.warning("Could not retrieve QR code: %s", exc)
         return None
+
+
+def reconnect_client() -> dict:
+    """
+    Tell the Node.js server to destroy its current client, delete the saved
+    session, and reinitialise so a fresh QR code is generated.
+    """
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(f"{WHATSAPP_WEB_SERVER_URL}/reconnect")
+            response.raise_for_status()
+            return response.json()
+    except Exception as exc:
+        logger.error("Failed to reconnect WhatsApp client: %s", exc)
+        return {"success": False, "message": str(exc)}
 
 
 # ---------------------------------------------------------------------------

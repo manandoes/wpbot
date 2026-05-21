@@ -35,8 +35,8 @@ export default function ContactsPage() {
     setLoading(true)
     getContacts({ page: p, page_size: PAGE_SIZE, search: s || undefined, status: st || undefined })
       .then(({ data }) => {
-        setContacts(data.contacts)
-        setTotal(data.total)
+        setContacts(data.contacts ?? [])
+        setTotal(data.total ?? 0)
       })
       .finally(() => setLoading(false))
   }

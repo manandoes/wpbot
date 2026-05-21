@@ -47,7 +47,7 @@ export default function DashboardPage() {
   }, [])
 
   if (loading) return <div className="p-8 text-gray-500">Loading stats…</div>
-  if (error || !stats) return <div className="p-8 text-red-500">{error || 'No data'}</div>
+  if (error || !stats?.status_breakdown) return <div className="p-8 text-red-500">{error || 'No data'}</div>
 
   const pieData = Object.entries(stats.status_breakdown).map(([key, val]) => ({
     name: FUNNEL_LABELS[key] ?? key,

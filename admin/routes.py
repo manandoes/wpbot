@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from db import SessionLocal
 from db.models import Contact, Conversation
-from bot.whatsapp_web import get_client_status, get_qr_code, restart_session, send_message
+from bot.whatsapp_web import get_client_status, get_qr_code, reconnect_client, send_message
 
 from .auth import create_access_token, get_current_admin, verify_password
 from .schemas import (
@@ -203,12 +203,9 @@ def admin_whatsapp_qr(_: str = Depends(get_current_admin)):
     return {"success": True, "qr": qr}
 
 
-@router.post("/whatsapp/restart-session")
-def admin_restart_session(_: str = Depends(get_current_admin)):
-    result = restart_session()
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
-    return result
+@router.post("/whatsapp/reconnect")
+def admin_whatsapp_reconnect(_: str = Depends(get_current_admin)):
+    return reconnect_client()
 
 
 # ---------------------------------------------------------------------------

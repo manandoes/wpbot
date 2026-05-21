@@ -1,14 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { getWhatsAppStatus, getQR, restartSession } from '../api/whatsapp'
+import { getWhatsAppStatus, getQR, reconnectWhatsApp } from '../api/whatsapp'
 import type { WhatsAppStatus } from '../api/whatsapp'
 
 export default function WhatsAppPage() {
   const [status, setStatus] = useState<WhatsAppStatus | null>(null)
   const [qr, setQr] = useState<string | null>(null)
   const [loadingQr, setLoadingQr] = useState(false)
-  const [restarting, setRestarting] = useState(false)
-  const [restartMsg, setRestartMsg] = useState<string | null>(null)
+  const [reconnecting, setReconnecting] = useState(false)
 
   const fetchStatus = useCallback(() => {
     getWhatsAppStatus().then(({ data }) => setStatus(data)).catch(() => {})
@@ -22,18 +21,18 @@ export default function WhatsAppPage() {
       .finally(() => setLoadingQr(false))
   }
 
-  const handleRestartSession = () => {
-    setRestarting(true)
-    setRestartMsg(null)
+  const handleReconnect = () => {
+    setReconnecting(true)
     setQr(null)
-    restartSession()
+    reconnectWhatsApp()
       .then(() => {
-        setRestartMsg('Session wiped. Waiting for new QR code…')
-        // Poll for QR after a short delay so the server has time to reinitialise
-        setTimeout(() => fetchQr(), 8000)
+        // Give the Node.js server ~4 s to reinitialise and emit a QR
+        setTimeout(() => {
+          fetchQr()
+          setReconnecting(false)
+        }, 4000)
       })
-      .catch(() => setRestartMsg('Restart failed — check server logs.'))
-      .finally(() => setRestarting(false))
+      .catch(() => setReconnecting(false))
   }
 
   useEffect(() => {
@@ -91,17 +90,33 @@ export default function WhatsAppPage() {
                   </button>
                 </>
               ) : (
-                <div className="py-8">
-                  <p className="text-gray-500 text-sm mb-3">
-                    {status === null ? 'Checking status…' : 'No QR code pending. The bot may be initializing.'}
+                <div className="py-8 space-y-3">
+                  <p className="text-gray-500 text-sm">
+                    {status === null
+                      ? 'Checking status…'
+                      : reconnecting
+                      ? 'Reconnecting — generating new QR code…'
+                      : 'No QR code available. The server may have a saved session that needs resetting.'}
                   </p>
-                  <button
-                    onClick={fetchQr}
-                    disabled={loadingQr}
-                    className="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    {loadingQr ? 'Loading…' : 'Load QR Code'}
-                  </button>
+                  <div className="flex flex-col gap-2 items-center">
+                    <button
+                      onClick={fetchQr}
+                      disabled={loadingQr || reconnecting}
+                      className="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 w-48"
+                    >
+                      {loadingQr ? 'Loading…' : 'Load QR Code'}
+                    </button>
+                    <button
+                      onClick={handleReconnect}
+                      disabled={reconnecting || loadingQr}
+                      className="border border-red-400 text-red-600 rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-50 disabled:opacity-50 w-48"
+                    >
+                      {reconnecting ? 'Reconnecting…' : 'Reset & Reconnect'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Use "Reset & Reconnect" if QR never appears — it clears any saved session.
+                  </p>
                 </div>
               )}
             </div>
@@ -110,27 +125,20 @@ export default function WhatsAppPage() {
           {status?.ready && (
             <div className="text-center py-4">
               <div className="text-5xl mb-3">✅</div>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-600 mb-4">
                 WhatsApp Web is authenticated and running.
                 <br />The bot is ready to send and receive messages.
               </p>
+              <button
+                onClick={handleReconnect}
+                disabled={reconnecting}
+                className="border border-gray-300 text-gray-500 rounded-lg px-4 py-2 text-xs font-medium hover:bg-gray-50 disabled:opacity-50"
+              >
+                {reconnecting ? 'Reconnecting…' : 'Switch Account / Reconnect'}
+              </button>
             </div>
           )}
 
-          {/* Restart session — always available */}
-          <div className="mt-6 border-t border-gray-100 pt-5 text-center">
-            <button
-              onClick={handleRestartSession}
-              disabled={restarting}
-              className="text-sm text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
-            >
-              {restarting ? 'Restarting…' : '⟳ Restart / Re-link WhatsApp'}
-            </button>
-            <p className="text-xs text-gray-400 mt-1">Wipes the saved session and generates a fresh QR code</p>
-            {restartMsg && (
-              <p className="text-xs text-indigo-600 mt-2 font-medium">{restartMsg}</p>
-            )}
-          </div>
         </div>
 
         <p className="text-xs text-gray-400 mt-3 text-center">Status refreshes every 5 seconds</p>
