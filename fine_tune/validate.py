@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-validate.py — Validates train.jsonl or valid.jsonl for the Arya fine-tune dataset.
+validate.py — Validates train.jsonl or valid.jsonl for the Coach Yogesh Vats fine-tune dataset.
 
 Usage:
     python validate.py train.jsonl
@@ -16,12 +16,16 @@ import sys
 from collections import Counter
 
 SYSTEM_PROMPT_PREFIXES = (
-    # original cold-lead Arya prompt
-    "You are Arya, a friendly WhatsApp Sales Consultant for Coach Yogesh Vats' Jira with AI Masterclass.",
-    # interested-lead personal Yogesh prompt
+    # current cold-lead prompt (post-migration)
+    "You are Coach Yogesh Vats messaging from your personal WhatsApp. You are not a sales bot",
+    # current interested-lead prompt
+    "You are Coach Yogesh Vats messaging from your personal WhatsApp. This person has already shown interest",
+    # legacy interested-lead prompt (pre-migration records from add_new_examples)
     "You are replying as Coach Yogesh Vats from his personal WhatsApp number. This lead has ALREADY shown interest",
-    # cold-lead personal Yogesh prompt
+    # legacy cold-lead prompt (pre-migration)
     "You are replying as Coach Yogesh Vats from his personal WhatsApp number.",
+    # original Arya prompt (pre-migration — should be zero after running migrate_persona.py)
+    "You are Arya, a friendly WhatsApp Sales Consultant for Coach Yogesh Vats' Jira with AI Masterclass.",
 )
 
 REQUIRED_KEYS = {"prompt", "completion", "meta"}
@@ -45,6 +49,8 @@ VALID_SCENARIOS = {
     "cold_share_link", "cold_who_is_this", "cold_qualify_yes", "cold_send_details",
     "cold_what_covered", "cold_beginner_friendly", "cold_close",
     "cold_not_interested", "cold_where_number", "cold_opening",
+    # new scenarios (pain discovery + non-Jira path)
+    "cold_pain_discovery", "cold_no_jira",
 }
 VALID_TONES = {"friendly", "empathetic", "concise", "reassuring", "pushy"}
 VALID_LABELS = {"positive", "negative"}

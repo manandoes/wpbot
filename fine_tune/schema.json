@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Arya WhatsApp Sales Consultant Fine-Tune Dataset",
-  "description": "Schema for train.jsonl (200 examples) and valid.jsonl (40 examples) used to fine-tune the Arya sales assistant model.",
+  "title": "Coach Yogesh Vats WhatsApp Sales Bot Fine-Tune Dataset",
+  "description": "Schema for train.jsonl and valid.jsonl used to fine-tune the Coach Yogesh Vats WhatsApp sales bot.",
   "file_counts": {
     "train.jsonl": 200,
     "valid.jsonl": 40
@@ -12,12 +12,12 @@
     "prompt": {
       "type": "string",
       "description": "Full input string: the exact system prompt followed by a blank line and then the user's incoming WhatsApp message. Format: '<SYSTEM_PROMPT>\\n\\n<USER_MESSAGE>'",
-      "example": "You are Arya, a friendly WhatsApp Sales Consultant...\n\nHi, who is this?"
+      "example": "You are Coach Yogesh Vats messaging from your personal WhatsApp...\n\nHi, who is this?"
     },
     "completion": {
       "type": "string",
-      "description": "The assistant's ideal reply as Arya — short, WhatsApp-friendly, warm, with light emojis. For negative examples, this intentionally demonstrates bad behavior (long paragraphs, aggression, fabricated claims).",
-      "example": "Hi! I'm Arya 😊 Reaching out about Coach Yogesh Vats' Jira with AI Masterclass — a LIVE 2-hour session at just ₹99. Curious to know more?"
+      "description": "Yogesh Vats' ideal reply — short, WhatsApp-friendly, warm, casual friend tone. For negative examples, this intentionally demonstrates bad behavior (long paragraphs, aggression, fabricated claims).",
+      "example": "Yogesh Vats here 😊 I coach teams on Jira and Agile. Quick question — do you work with Jira?"
     },
     "meta": {
       "type": "object",
@@ -38,13 +38,16 @@
             "objection_recording",
             "objection_not_interested",
             "follow_up",
-            "booking_confirmation"
+            "booking_confirmation",
+            "cold_opening",
+            "cold_pain_discovery",
+            "cold_no_jira"
           ],
           "example": "objection_recording"
         },
         "name_present": {
           "type": "boolean",
-          "description": "Whether the contact's name is present/known in this example. Arya should use it if true.",
+          "description": "Whether the contact's name is present/known in this example. Yogesh should use it if true.",
           "example": true
         },
         "role_relevant": {
