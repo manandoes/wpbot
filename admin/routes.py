@@ -3,7 +3,7 @@ admin/routes.py
 Admin API endpoints — all protected by JWT except /admin/login.
 """
 
-import os
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from db import SessionLocal
 from db.models import Contact, Conversation
-from bot.whatsapp_web import get_client_status, get_qr_code
+from bot.whatsapp_web import get_client_status, get_qr_code, restart_session, send_message
 
 from .auth import create_access_token, get_current_admin, verify_password
 from .schemas import (
@@ -24,6 +24,11 @@ from .schemas import (
     ContactItem,
     ConversationResponse,
     MessageItem,
+    SendMessageRequest,
+    BulkSendRequest,
+    BulkSendResult,
+    BulkSendResultItem,
+    UpdateStatusRequest,
 )
 
 router = APIRouter(tags=["Admin"])
@@ -196,3 +201,107 @@ def admin_whatsapp_qr(_: str = Depends(get_current_admin)):
             status_code=400,
         )
     return {"success": True, "qr": qr}
+
+
+@router.post("/whatsapp/restart-session")
+def admin_restart_session(_: str = Depends(get_current_admin)):
+    result = restart_session()
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Messaging
+# ---------------------------------------------------------------------------
+
+def _upsert_contact_and_save(db, phone_number: str, name: Optional[str], message: str):
+    """Upsert contact, save outgoing message to conversations, update status."""
+    contact = db.query(Contact).filter(Contact.phone_number == phone_number).first()
+    now = datetime.utcnow()
+    if contact is None:
+        contact = Contact(
+            phone_number=phone_number,
+            name=name or None,
+            status="first_message_sent",
+            last_contacted_at=now,
+        )
+        db.add(contact)
+    else:
+        if name and not contact.name:
+            contact.name = name
+        if contact.status == "not_contacted":
+            contact.status = "first_message_sent"
+        contact.last_contacted_at = now
+
+    conv = Conversation(
+        phone_number=phone_number,
+        role="model",
+        message=message,
+        timestamp=now,
+    )
+    db.add(conv)
+    db.commit()
+
+
+@router.post("/send-message")
+def admin_send_message(body: SendMessageRequest, _: str = Depends(get_current_admin)):
+    success = send_message(body.phone_number, body.message)
+    if not success:
+        raise HTTPException(status_code=502, detail="Failed to send message via WhatsApp")
+    db = SessionLocal()
+    try:
+        _upsert_contact_and_save(db, body.phone_number, None, body.message)
+    finally:
+        db.close()
+    return {"success": True, "phone_number": body.phone_number}
+
+
+@router.post("/bulk-send", response_model=BulkSendResult)
+def admin_bulk_send(body: BulkSendRequest, _: str = Depends(get_current_admin)):
+    results = []
+    sent = 0
+    failed = 0
+    for i, contact in enumerate(body.contacts):
+        if i > 0:
+            time.sleep(1.5)
+        try:
+            ok = send_message(contact.phone_number, body.message)
+            if ok:
+                db = SessionLocal()
+                try:
+                    _upsert_contact_and_save(db, contact.phone_number, contact.name, body.message)
+                finally:
+                    db.close()
+                results.append(BulkSendResultItem(phone_number=contact.phone_number, success=True))
+                sent += 1
+            else:
+                results.append(BulkSendResultItem(
+                    phone_number=contact.phone_number, success=False, error="Send failed"
+                ))
+                failed += 1
+        except Exception as e:
+            results.append(BulkSendResultItem(
+                phone_number=contact.phone_number, success=False, error=str(e)
+            ))
+            failed += 1
+    return BulkSendResult(total=len(body.contacts), sent=sent, failed=failed, results=results)
+
+
+@router.patch("/contacts/{phone_number}/status")
+def admin_update_status(
+    phone_number: str,
+    body: UpdateStatusRequest,
+    _: str = Depends(get_current_admin),
+):
+    db = SessionLocal()
+    try:
+        contact = db.query(Contact).filter(Contact.phone_number == phone_number).first()
+        if not contact:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        contact.status = body.status
+        contact.last_contacted_at = datetime.utcnow()
+        db.commit()
+        return {"success": True, "phone_number": phone_number, "status": body.status}
+    finally:
+        db.close()

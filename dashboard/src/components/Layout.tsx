@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 const NAV = [
   { to: '/', label: 'Dashboard', icon: '📊' },
   { to: '/contacts', label: 'Contacts', icon: '👥' },
+  { to: '/messaging', label: 'Messaging', icon: '💬' },
   { to: '/whatsapp', label: 'WhatsApp', icon: '📱' },
 ]
 

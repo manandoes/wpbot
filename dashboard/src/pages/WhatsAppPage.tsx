@@ -1,12 +1,14 @@
 import { useEffect, useState, useCallback } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { getWhatsAppStatus, getQR } from '../api/whatsapp'
+import { getWhatsAppStatus, getQR, restartSession } from '../api/whatsapp'
 import type { WhatsAppStatus } from '../api/whatsapp'
 
 export default function WhatsAppPage() {
   const [status, setStatus] = useState<WhatsAppStatus | null>(null)
   const [qr, setQr] = useState<string | null>(null)
   const [loadingQr, setLoadingQr] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  const [restartMsg, setRestartMsg] = useState<string | null>(null)
 
   const fetchStatus = useCallback(() => {
     getWhatsAppStatus().then(({ data }) => setStatus(data)).catch(() => {})
@@ -18,6 +20,20 @@ export default function WhatsAppPage() {
       .then(({ data }) => setQr(data.qr || null))
       .catch(() => setQr(null))
       .finally(() => setLoadingQr(false))
+  }
+
+  const handleRestartSession = () => {
+    setRestarting(true)
+    setRestartMsg(null)
+    setQr(null)
+    restartSession()
+      .then(() => {
+        setRestartMsg('Session wiped. Waiting for new QR code…')
+        // Poll for QR after a short delay so the server has time to reinitialise
+        setTimeout(() => fetchQr(), 8000)
+      })
+      .catch(() => setRestartMsg('Restart failed — check server logs.'))
+      .finally(() => setRestarting(false))
   }
 
   useEffect(() => {
@@ -100,6 +116,21 @@ export default function WhatsAppPage() {
               </p>
             </div>
           )}
+
+          {/* Restart session — always available */}
+          <div className="mt-6 border-t border-gray-100 pt-5 text-center">
+            <button
+              onClick={handleRestartSession}
+              disabled={restarting}
+              className="text-sm text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+            >
+              {restarting ? 'Restarting…' : '⟳ Restart / Re-link WhatsApp'}
+            </button>
+            <p className="text-xs text-gray-400 mt-1">Wipes the saved session and generates a fresh QR code</p>
+            {restartMsg && (
+              <p className="text-xs text-indigo-600 mt-2 font-medium">{restartMsg}</p>
+            )}
+          </div>
         </div>
 
         <p className="text-xs text-gray-400 mt-3 text-center">Status refreshes every 5 seconds</p>

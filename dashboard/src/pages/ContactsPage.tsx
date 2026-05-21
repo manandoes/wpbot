@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getContacts } from '../api/contacts'
 import type { ContactItem } from '../api/contacts'
+import { updateContactStatus } from '../api/messaging'
 import StatusBadge from '../components/StatusBadge'
 
 const STATUSES = [
@@ -28,6 +29,7 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(true)
+  const [updatingStatus, setUpdatingStatus] = useState<Record<number, boolean>>({})
   const navigate = useNavigate()
 
   const fetchContacts = (p = page, s = search, st = status) => {
@@ -52,6 +54,21 @@ export default function ContactsPage() {
     setStatus(s)
     setPage(1)
     fetchContacts(1, search, s)
+  }
+
+  const handleStatusUpdate = async (contact: ContactItem, newStatus: string) => {
+    if (newStatus === contact.status) return
+    setUpdatingStatus((prev) => ({ ...prev, [contact.id]: true }))
+    try {
+      await updateContactStatus(contact.phone_number, newStatus)
+      setContacts((prev) =>
+        prev.map((c) => (c.id === contact.id ? { ...c, status: newStatus } : c))
+      )
+    } catch {
+      // silently ignore; the select will revert since we didn't update state
+    } finally {
+      setUpdatingStatus((prev) => ({ ...prev, [contact.id]: false }))
+    }
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
@@ -118,7 +135,18 @@ export default function ContactsPage() {
                 <tr key={c.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">{c.name || '—'}</td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{c.phone_number}</td>
-                  <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
+                  <td className="px-4 py-3">
+                    <select
+                      value={c.status}
+                      disabled={updatingStatus[c.id]}
+                      onChange={(e) => handleStatusUpdate(c, e.target.value)}
+                      className="border border-gray-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
+                    >
+                      {STATUSES.filter(Boolean).map((s) => (
+                        <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="px-4 py-3 text-gray-500 text-xs">
                     {new Date(c.last_contacted_at).toLocaleString()}
                   </td>

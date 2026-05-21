@@ -3,8 +3,17 @@ admin/schemas.py
 Pydantic models for admin API requests and responses.
 """
 
-from typing import Dict, List, Optional
-from pydantic import BaseModel
+from typing import List, Optional
+from pydantic import BaseModel, field_validator
+
+_ALL_STATUSES = [
+    "not_contacted",
+    "first_message_sent",
+    "in_conversation",
+    "booked",
+    "not_interested",
+    "follow_up_sent",
+]
 
 
 class LoginRequest(BaseModel):
@@ -61,3 +70,42 @@ class ConversationResponse(BaseModel):
     contact_name: Optional[str]
     contact_status: str
     messages: List[MessageItem]
+
+
+class SendMessageRequest(BaseModel):
+    phone_number: str
+    message: str
+
+
+class BulkContact(BaseModel):
+    phone_number: str
+    name: Optional[str] = None
+
+
+class BulkSendRequest(BaseModel):
+    contacts: List[BulkContact]
+    message: str
+
+
+class BulkSendResultItem(BaseModel):
+    phone_number: str
+    success: bool
+    error: Optional[str] = None
+
+
+class BulkSendResult(BaseModel):
+    total: int
+    sent: int
+    failed: int
+    results: List[BulkSendResultItem]
+
+
+class UpdateStatusRequest(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in _ALL_STATUSES:
+            raise ValueError(f"status must be one of {_ALL_STATUSES}")
+        return v

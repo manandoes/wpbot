@@ -10,6 +10,8 @@
 
 const express = require('express');
 const bodyParser = require('body-parser');
+const fs = require('fs');
+const path = require('path');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
@@ -278,6 +280,37 @@ app.get('/qr', (req, res) => {
     success: true,
     qr: clientQRCode,
   });
+});
+
+/**
+ * POST /restart-session
+ * Wipe the saved session and reinitialise the client so a fresh QR is generated.
+ */
+app.post('/restart-session', async (req, res) => {
+  console.log('🔄 restart-session requested — wiping session and reinitialising...');
+  clientReady = false;
+  clientQRCode = null;
+
+  try {
+    await client.destroy();
+  } catch (e) {
+    console.warn('Warning during client.destroy():', e.message);
+  }
+
+  const sessionPath = path.join(__dirname, '.wwebjs_auth', `session-${SESSION_NAME}`);
+  if (fs.existsSync(sessionPath)) {
+    fs.rmSync(sessionPath, { recursive: true, force: true });
+    console.log('🗑️  Session data deleted:', sessionPath);
+  }
+
+  try {
+    await client.initialize();
+    console.log('🔄 Client reinitialised — QR will appear shortly');
+    res.json({ success: true, message: 'Session wiped. Scan the new QR code.' });
+  } catch (e) {
+    console.error('Error reinitialising client:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────

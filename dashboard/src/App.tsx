@@ -6,6 +6,7 @@ import DashboardPage from './pages/DashboardPage'
 import ContactsPage from './pages/ContactsPage'
 import ConversationPage from './pages/ConversationPage'
 import WhatsAppPage from './pages/WhatsAppPage'
+import MessagingPage from './pages/MessagingPage'
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="contacts" element={<ContactsPage />} />
             <Route path="contacts/:phone/conversation" element={<ConversationPage />} />
             <Route path="whatsapp" element={<WhatsAppPage />} />
+            <Route path="messaging" element={<MessagingPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
