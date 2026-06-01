@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 WHATSAPP_WEB_SERVER_URL = os.getenv("WHATSAPP_WEB_SERVER_URL", "http://localhost:3000")
 TIMEOUT = 10.0
 
+# Persistent client — reuses TCP connections across calls
+_http = httpx.Client(timeout=TIMEOUT)
+
 
 # ---------------------------------------------------------------------------
 # Client Status
@@ -28,15 +31,14 @@ TIMEOUT = 10.0
 def get_client_status() -> dict:
     """
     Get the status of the WhatsApp Web client.
-    
+
     Returns:
         dict with keys: ready, phone_number, qr_pending
     """
     try:
-        with httpx.Client(timeout=TIMEOUT) as client:
-            response = client.get(f"{WHATSAPP_WEB_SERVER_URL}/status")
-            response.raise_for_status()
-            return response.json()
+        response = _http.get(f"{WHATSAPP_WEB_SERVER_URL}/status")
+        response.raise_for_status()
+        return response.json()
     except Exception as exc:
         logger.error("Failed to get WhatsApp Web client status: %s", exc)
         return {
@@ -44,7 +46,6 @@ def get_client_status() -> dict:
             "phone_number": None,
             "error": str(exc),
         }
-
 
 
 def get_qr_code() -> Optional[str]:
@@ -55,12 +56,11 @@ def get_qr_code() -> Optional[str]:
         QR code string if pending, None otherwise.
     """
     try:
-        with httpx.Client(timeout=TIMEOUT) as client:
-            response = client.get(f"{WHATSAPP_WEB_SERVER_URL}/qr")
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("qr")
-            return None
+        response = _http.get(f"{WHATSAPP_WEB_SERVER_URL}/qr")
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("qr")
+        return None
     except Exception as exc:
         logger.warning("Could not retrieve QR code: %s", exc)
         return None
@@ -72,10 +72,9 @@ def reconnect_client() -> dict:
     session, and reinitialise so a fresh QR code is generated.
     """
     try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.post(f"{WHATSAPP_WEB_SERVER_URL}/reconnect")
-            response.raise_for_status()
-            return response.json()
+        response = _http.post(f"{WHATSAPP_WEB_SERVER_URL}/reconnect", timeout=30.0)
+        response.raise_for_status()
+        return response.json()
     except Exception as exc:
         logger.error("Failed to reconnect WhatsApp client: %s", exc)
         return {"success": False, "message": str(exc)}
@@ -104,19 +103,15 @@ def send_media_base64(
             "caption": caption,
             "filename": filename,
         }
-        with httpx.Client(timeout=TIMEOUT) as client:
-            response = client.post(
-                f"{WHATSAPP_WEB_SERVER_URL}/send-base64-media",
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if data.get("success"):
-                logger.info("Media sent to %s", phone_number)
-                return True
-            else:
-                logger.error("Media send failed: %s", data.get("error"))
-                return False
+        response = _http.post(f"{WHATSAPP_WEB_SERVER_URL}/send-base64-media", json=payload)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("success"):
+            logger.info("Media sent to %s", phone_number)
+            return True
+        else:
+            logger.error("Media send failed: %s", data.get("error"))
+            return False
     except Exception as exc:
         logger.exception("Error sending media to %s: %s", phone_number, exc)
         return False
@@ -139,28 +134,24 @@ def send_message(phone_number: str, message_text: str, media_url: Optional[str] 
             "phone_number": phone_number,
             "message_text": message_text,
         }
-        
+
         if media_url:
             payload["media_url"] = media_url
 
-        with httpx.Client(timeout=TIMEOUT) as client:
-            response = client.post(
-                f"{WHATSAPP_WEB_SERVER_URL}/send",
-                json=payload,
+        response = _http.post(f"{WHATSAPP_WEB_SERVER_URL}/send", json=payload)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("success"):
+            logger.info(
+                "Message sent to %s | message_id=%s",
+                phone_number,
+                data.get("message_id", "unknown"),
             )
-            response.raise_for_status()
-            data = response.json()
-            
-            if data.get("success"):
-                logger.info(
-                    "Message sent to %s | message_id=%s",
-                    phone_number,
-                    data.get("message_id", "unknown"),
-                )
-                return True
-            else:
-                logger.error("Send failed: %s", data.get("error"))
-                return False
+            return True
+        else:
+            logger.error("Send failed: %s", data.get("error"))
+            return False
 
     except httpx.HTTPStatusError as exc:
         logger.error(

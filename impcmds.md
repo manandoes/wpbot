@@ -7,8 +7,9 @@ docker compose up -d
 
 
 ## Start the server, on gcp
+gcloud compute ssh instance-20260520-212946 --project=you-tube-automation-493118 --zone=us-central1-a
+
 sudo su - Dell
-gcloud compute ssh wpbot --project=you-tube-automation-493118 --zone=us-central1-a
 cd ~/wpbot
 bash deploy.sh
 

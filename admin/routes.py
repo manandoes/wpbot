@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from db import SessionLocal
-from db.models import Contact, Conversation
+from db.models import Contact, Conversation, Registration
 from bot.whatsapp_web import get_client_status, get_qr_code, reconnect_client, send_message
 
 from .auth import create_access_token, get_current_admin, verify_password
@@ -300,5 +300,34 @@ def admin_update_status(
         contact.last_contacted_at = datetime.utcnow()
         db.commit()
         return {"success": True, "phone_number": phone_number, "status": body.status}
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Reset all
+# ---------------------------------------------------------------------------
+
+@router.delete("/reset-all")
+def admin_reset_all(_: str = Depends(get_current_admin)):
+    """
+    Delete all conversation history and registrations for every contact,
+    and reset all contact statuses to 'not_contacted'.
+    """
+    db = SessionLocal()
+    try:
+        conversations_deleted = db.query(Conversation).delete()
+        registrations_deleted = db.query(Registration).delete()
+        contacts_reset = db.query(Contact).update({"status": "not_contacted"})
+        db.commit()
+        return {
+            "success": True,
+            "conversations_deleted": conversations_deleted,
+            "registrations_deleted": registrations_deleted,
+            "contacts_reset": contacts_reset,
+        }
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Reset failed: {exc}")
     finally:
         db.close()

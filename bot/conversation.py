@@ -38,13 +38,15 @@ def _get_or_create_contact(db: Session, phone_number: str) -> Contact:
 
 
 def _load_history(db: Session, phone_number: str) -> list:
-    """Load all conversation rows for a phone number, ordered by timestamp."""
+    """Load the last 20 conversation rows for a phone number, ordered by timestamp."""
     rows = (
         db.query(Conversation)
         .filter(Conversation.phone_number == phone_number)
-        .order_by(Conversation.timestamp.asc())
+        .order_by(Conversation.timestamp.desc())
+        .limit(20)
         .all()
     )
+    rows.reverse()
     return [{"role": row.role, "message": row.message} for row in rows]
 
 

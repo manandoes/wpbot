@@ -224,6 +224,12 @@ app.post('/reconnect', async (req, res) => {
     console.log('🗑️  Cleared saved session.');
   }
 
+  const cacheDir = path.join(__dirname, '.wwebjs_cache');
+  if (fs.existsSync(cacheDir)) {
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+    console.log('🗑️  Cleared session cache.');
+  }
+
   console.log('🔄 Reinitializing WhatsApp client...');
   client = createClient();
   client.initialize();
