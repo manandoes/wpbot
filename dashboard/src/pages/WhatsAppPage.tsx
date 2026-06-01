@@ -132,9 +132,9 @@ export default function WhatsAppPage() {
               <button
                 onClick={handleReconnect}
                 disabled={reconnecting}
-                className="border border-gray-300 text-gray-500 rounded-lg px-4 py-2 text-xs font-medium hover:bg-gray-50 disabled:opacity-50"
+                className="border border-red-400 text-red-600 rounded-lg px-4 py-2 text-xs font-medium hover:bg-red-50 disabled:opacity-50"
               >
-                {reconnecting ? 'Reconnecting…' : 'Switch Account / Reconnect'}
+                {reconnecting ? 'Disconnecting…' : 'Disconnect'}
               </button>
             </div>
           )}
