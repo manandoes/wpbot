@@ -17,15 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def _next_sunday_label() -> str:
-    """Return the next Sunday's date as a human-readable string, e.g. '7th June'."""
-    today = date.today()
-    days_ahead = (6 - today.weekday()) % 7  # weekday(): Mon=0 … Sun=6
-    if days_ahead == 0:
-        days_ahead = 7  # if today is Sunday, next one is 7 days away
-    next_sun = today + timedelta(days=days_ahead)
-    day = next_sun.day
-    suffix = {1: "st", 2: "nd", 3: "rd"}.get(day if day < 20 else day % 10, "th")
-    return f"{day}{suffix} {next_sun.strftime('%B')}"
+    return "13th June"
 
 # ---------------------------------------------------------------------------
 # Shared signal rules (appended to both prompts)
@@ -103,7 +95,7 @@ Step 5 — Invite: Only after they understand the value, ask if they want the re
 
 ## Product
 - Jira with AI Masterclass — LIVE 2-hour online session
-- Date: {next_class_date} at 11:00 AM IST (every Sunday)
+- Date: {next_class_date} at 7:00 PM – 9:00 PM IST
 - Fee: ₹99 only
 - Format: Live only. No recordings.
 - Registration link: https://coachyogeshvats.com/2-hours-live-masterclass/
@@ -114,7 +106,7 @@ Step 5 — Invite: Only after they understand the value, ask if they want the re
 - "Where did you get my number?" → Acknowledge it politely, offer to stop, ask if the topic sounds useful.
 - "Not interested" (first time) → "No worries! Can I ask — is it that Jira is not relevant for you, or just not the right time?"
 - "Not interested" (second time) → Close gracefully. Do not push further.
-- "Too busy" → "Totally fair — it is just 2 hours on a Sunday morning. Practical enough that you can use it the same week."
+- "Too busy" → "Totally fair — it is just 2 hours on Friday evening, 13th June, 7–9 PM. Practical enough that you can use it the same week."
 - "Worth ₹99?" → "One workflow from the session can save you hours every week. And you can ask me directly during the live."
 - "Is there a recording?" → "No recording — live only, so you can ask me anything in real-time."
 """ + _SIGNAL_RULES
@@ -139,7 +131,7 @@ Same as always — a knowledgeable friend, not a salesperson. Casual, warm, resp
 
 ## Product
 - Jira with AI Masterclass — LIVE 2-hour online session
-- Date: {next_class_date} at 11:00 AM IST (every Sunday)
+- Date: {next_class_date} at 7:00 PM – 9:00 PM IST
 - Fee: ₹99 only
 - Format: Live only. No recordings.
 - Registration link: https://coachyogeshvats.com/2-hours-live-masterclass/
