@@ -10,6 +10,7 @@ Endpoints:
   GET  /whatsapp/qr                  → Get QR code for authentication
   POST /webhook/whatsapp-web         → Receive messages from Node.js server
   POST /outreach/start               → Trigger bulk outreach from contacts.csv
+  POST /send-message                 → Send a single WhatsApp message (API key protected)
 """
 
 import logging
@@ -18,12 +19,13 @@ import os
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from db import init_db, SessionLocal
 from db.models import Contact, Conversation, Registration
 from bot.conversation import handle_message
-from bot.whatsapp_web import parse_incoming, get_client_status, get_qr_code
+from bot.whatsapp_web import parse_incoming, get_client_status, get_qr_code, send_message
 from bot.followup import start_scheduler, stop_scheduler
 from outreach.bulk_sender import run_bulk_outreach
 from admin.routes import router as admin_router
@@ -265,6 +267,30 @@ async def reset_contact(phone_number: str):
         raise HTTPException(status_code=500, detail=f"Failed to reset contact: {exc}")
     finally:
         db.close()
+
+
+class SendMessageRequest(BaseModel):
+    phone_number: str
+    message: str
+    api_key: str
+
+
+@app.post("/send-message", tags=["Utility"])
+async def send_single_message(body: SendMessageRequest):
+    """
+    Send a single WhatsApp message to a phone number.
+    Requires api_key matching the SEND_MESSAGE_API_KEY environment variable.
+    phone_number format: country code + number, e.g. "919876543210"
+    """
+    expected_key = os.getenv("SEND_MESSAGE_API_KEY", "")
+    if not expected_key or body.api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    success = send_message(body.phone_number, body.message)
+    if not success:
+        raise HTTPException(status_code=502, detail="Failed to send message via WhatsApp")
+
+    return {"success": True, "phone_number": body.phone_number}
 
 
 def _run_outreach_background() -> None:
