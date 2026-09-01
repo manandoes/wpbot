@@ -1,50 +1,85 @@
-## Wipe the previous WhatsApp session (get a fresh QR)
+# wpbot — VM commands
 
-The gateway clears `.wwebjs_auth` / `.wwebjs_cache` on the mounted disk and
-re-initialises itself:
+New VM (created by `gcp-vm-setup.sh`):
 
-```bash
-curl -X POST -H "Authorization: Bearer $GATEWAY_TOKEN" \
-  https://wpbot-whatsapp.onrender.com/reconnect
+```
+INSTANCE = wpbot
+ZONE     = us-central1-a
+PROJECT  = you-tube-automation-493118
 ```
 
-Then fetch the new QR (or read it off the gateway's logs):
+Override the name/zone by exporting `GCP_INSTANCE` / `GCP_ZONE` before running
+the setup script.
+
+## First-time provisioning (run locally, from the project root)
+
+Requires an OPEN billing account on the project — Compute Engine refuses
+otherwise.
 
 ```bash
-curl -H "Authorization: Bearer $GATEWAY_TOKEN" \
-  https://wpbot-whatsapp.onrender.com/qr
+bash gcp-vm-setup.sh
 ```
 
-## Deploy
+Creates the VM, opens ports 80/443, installs Docker, clones the repo, copies
+`.env` up, and runs `deploy.sh`.
 
-Render auto-deploys on push to `main`. To force one:
-Render Dashboard → service → **Manual Deploy** → *Deploy latest commit*.
+## SSH in
+
+```bash
+gcloud compute ssh wpbot --project=you-tube-automation-493118 --zone=us-central1-a
+```
+
+## Redeploy after a push
+
+```bash
+gcloud compute ssh wpbot --project=you-tube-automation-493118 --zone=us-central1-a \
+    --command='cd ~/wpbot && bash deploy.sh'
+```
+
+## Scan the WhatsApp QR (first boot, and after wiping the session)
+
+```bash
+gcloud compute ssh wpbot --project=you-tube-automation-493118 --zone=us-central1-a \
+    --command='cd ~/wpbot && docker compose logs -f whatsapp-server'
+```
+
+Scan with WhatsApp → Linked Devices. The session persists in the
+`whatsapp_session` volume, so this is one-time.
+
+## Wipe the previous session
+
+```bash
+cd ~/wpbot
+docker compose down
+docker volume rm wpbot_whatsapp_session wpbot_whatsapp_cache
+docker compose up -d
+```
+
+## Logs
+
+```bash
+cd ~/wpbot
+docker compose logs -f                  # everything
+docker compose logs -f python-api       # API only
+docker compose logs -f whatsapp-server  # gateway only
+```
 
 ## Delete history of a specific user
 
 Easiest — the API does all three steps at once:
 
 ```bash
-curl -X DELETE https://wpbot-api.onrender.com/contact/919876543210/reset
+curl -X DELETE http://<VM-IP>/contact/919876543210/reset
 ```
 
-Or by hand against the database. Grab the **External Database URL** from
-Render Dashboard → `wpbot-db` → Connections:
+Or by hand in the database:
 
 ```bash
-psql "<external-database-url>"
+cd ~/wpbot && docker compose exec postgres psql -U wpbot -d wpbot
 ```
 
 ```sql
 DELETE FROM conversations WHERE phone_number = '919876543210';
 UPDATE contacts SET status = 'not_contacted' WHERE phone_number = '919876543210';
 \q
-```
-
-## Logs
-
-Render Dashboard → service → **Logs**, or with the Render CLI:
-
-```bash
-render logs -r wpbot-whatsapp --tail
 ```

@@ -1,0 +1,86 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wpbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wpbot123}
+      POSTGRES_DB: ${POSTGRES_DB:-wpbot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wpbot} -d ${POSTGRES_DB:-wpbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  python-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wpbot}:${POSTGRES_PASSWORD:-wpbot123}@postgres:5432/${POSTGRES_DB:-wpbot}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      WHATSAPP_WEB_SERVER_URL: http://whatsapp-server:3000
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      SEND_MESSAGE_API_KEY: ${SEND_MESSAGE_API_KEY}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
+      # Shared secret for the gateway's write endpoints — must match the
+      # value passed to whatsapp-server below.
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - internal
+
+  whatsapp-server:
+    build:
+      context: ./whatsapp-web-server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    shm_size: 256mb
+    environment:
+      PYTHON_API_URL: http://python-api:8000
+      WHATSAPP_WEB_PORT: 3000
+      # The gateway fails closed when NODE_ENV=production and GATEWAY_TOKEN is
+      # unset: /send, /qr and /reconnect return 503 until it is provided.
+      NODE_ENV: production
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN}
+    volumes:
+      - whatsapp_session:/app/.wwebjs_auth
+      - whatsapp_cache:/app/.wwebjs_cache
+    networks:
+      - internal
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      python-api:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+  whatsapp_session:
+  whatsapp_cache:
+
+networks:
+  internal:
+    driver: bridge

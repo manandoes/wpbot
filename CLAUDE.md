@@ -32,8 +32,9 @@ Required in `.env`:
 - `DATABASE_URL` — PostgreSQL connection string (e.g., `postgresql://user:pass@host/db`)
 - `GEMINI_API_KEY` — Google Gemini API key
 - `WHATSAPP_WEB_SERVER_URL` — URL of Node.js whatsapp-web.js server (default: `http://localhost:3000`)
-- `GATEWAY_TOKEN` — shared secret for the gateway's write endpoints; must match on both services. Blank locally disables the check.
-- `WWEBJS_DATA_PATH` — directory for the WhatsApp session (Render disk mount; blank = `whatsapp-web-server/`)
+- `GATEWAY_TOKEN` — shared secret for the gateway's write endpoints; must match on both services. Blank is allowed locally; the gateway returns 503 on those endpoints when `NODE_ENV=production` and it is unset.
+- `SEND_MESSAGE_API_KEY` — protects `POST /send-message`
+- `WWEBJS_DATA_PATH` — directory for the WhatsApp session (blank = `whatsapp-web-server/`, which is the volume mount point in Docker)
 
 ## Architecture
 
@@ -78,5 +79,6 @@ not_contacted → first_message_sent → in_conversation → booked
 - The WhatsApp Web client runs as a separate Node.js process in `whatsapp-web-server/`
 - Webhook must return 200 OK within 3 seconds — heavy work (Gemini call) is offloaded to FastAPI BackgroundTasks
 - Follow-up scheduler uses APScheduler — will fail silently in serverless environments
-- Deployment is Render-only (see [RENDER.md](RENDER.md) and [render.yaml](render.yaml)). The Docker/GCP setup was removed — do not reintroduce Dockerfiles or compose files.
-- The WhatsApp gateway needs ~2 GB RAM for headless Chrome and a persistent disk for its session, so it cannot run on Render's free plan
+- Deployment is Docker Compose on a Google Cloud VM. `gcp-vm-setup.sh` provisions the VM from your laptop; `deploy.sh` runs on the VM to build and restart the stack. See [impcmds.md](impcmds.md) for day-to-day commands.
+- The stack is four containers: `postgres`, `python-api`, `whatsapp-server`, and `nginx` (serves the built React dashboard and proxies the API on port 80)
+- The WhatsApp gateway runs headless Chrome and needs ~2 GB RAM, which is why `gcp-vm-setup.sh` defaults to an `e2-standard-2` VM

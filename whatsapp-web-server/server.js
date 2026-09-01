@@ -12,7 +12,8 @@ app.use(bodyParser.json());
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL || 'http://localhost:8000';
 const WEBHOOK_PATH = '/webhook/whatsapp-web';
-// Render injects PORT; WHATSAPP_WEB_PORT stays supported for local runs.
+// WHATSAPP_WEB_PORT is what docker-compose sets; PORT is honoured too so the
+// container works unchanged behind a host that injects it.
 const SERVER_PORT = process.env.PORT || process.env.WHATSAPP_WEB_PORT || 3000;
 const SESSION_NAME = 'wpbot-session';
 
@@ -21,9 +22,9 @@ const SESSION_NAME = 'wpbot-session';
 // must name a file in wppconnect-team/wa-version's html/ directory.
 const WEB_VERSION = process.env.WWEBJS_WEB_VERSION || '2.3000.1046540740-alpha';
 
-// Where the WhatsApp login is persisted. On Render this points at the mounted
-// disk (/var/data) so the session survives deploys and restarts; locally it
-// falls back to the project directory.
+// Where the WhatsApp login is persisted. Defaults to the project directory,
+// which inside the container is /app — the path docker-compose mounts the
+// whatsapp_session volume onto, so the session survives rebuilds.
 //
 // LocalAuth writes to `<dataPath>/session-<clientId>`, so AUTH_DIR must include
 // the `.wwebjs_auth` segment to keep the on-disk layout identical to the
@@ -31,14 +32,14 @@ const WEB_VERSION = process.env.WWEBJS_WEB_VERSION || '2.3000.1046540740-alpha';
 const DATA_PATH = process.env.WWEBJS_DATA_PATH || __dirname;
 const AUTH_DIR = path.join(DATA_PATH, '.wwebjs_auth');
 
-// Shared secret required by the write endpoints. The gateway is publicly
-// reachable on Render (no private network), so leaving this unset in
-// production means anyone can send WhatsApp messages through this service.
+// Shared secret required by the write endpoints. Defence in depth: these sit
+// on the compose-internal network, but a published port or an opened VM
+// firewall would otherwise expose an unauthenticated WhatsApp relay.
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '';
 
-// Render sets RENDER=true on every service, and NODE_ENV=production on Node
-// ones. Either is enough to know we are not on a developer's laptop.
-const IS_PRODUCTION = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+// docker-compose sets NODE_ENV=production for the deployed gateway; without it
+// we assume a developer's laptop and allow a blank token.
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 let clientReady = false;
 let clientQRCode = null;
@@ -68,8 +69,8 @@ function createClient() {
         '--disable-extensions',
       ],
       headless: true,
-      // Puppeteer resolves its bundled Chrome via PUPPETEER_CACHE_DIR unless
-      // an explicit binary is provided.
+      // The image installs system Chromium and points PUPPETEER_EXECUTABLE_PATH
+      // at it; without that, puppeteer falls back to its own bundled download.
       ...(process.env.PUPPETEER_EXECUTABLE_PATH
         ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH }
         : {}),
@@ -391,9 +392,9 @@ async function sendToContact(phoneNumber, content, options) {
 /**
  * Guards every endpoint that can send messages or touch the session.
  *
- * Under docker-compose these endpoints sat on a private network. On Render
- * each service gets a public URL, so an unguarded /send would let anyone on
- * the internet send WhatsApp messages as this account.
+ * These sit on the compose-internal network, so this is defence in depth: it
+ * keeps the gateway safe if the port is ever published or the VM firewall is
+ * opened up by mistake.
  */
 function requireToken(req, res, next) {
   if (!GATEWAY_TOKEN) {

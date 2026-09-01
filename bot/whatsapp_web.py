@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 WHATSAPP_WEB_SERVER_URL = os.getenv("WHATSAPP_WEB_SERVER_URL", "http://localhost:3000")
 TIMEOUT = 10.0
 
-# Shared secret for the gateway's write endpoints. On Render the gateway is
-# reachable over the public internet, so this is what stops anyone else from
-# sending messages through it. Must match GATEWAY_TOKEN on the Node service.
+# Shared secret for the gateway's write endpoints. Must match GATEWAY_TOKEN on
+# the Node service, which refuses to serve those endpoints without it when
+# NODE_ENV=production.
 GATEWAY_TOKEN = os.getenv("GATEWAY_TOKEN", "")
 
 _auth_headers = {"Authorization": f"Bearer {GATEWAY_TOKEN}"} if GATEWAY_TOKEN else {}

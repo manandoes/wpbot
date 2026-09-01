@@ -56,7 +56,3 @@ whatsapp-web-server/session-*/
 session-*/
 whatsapp-web-server/.wwebjs_cache/
 whatsapp-web-server/venv/
-
-# Puppeteer Chrome download (Render build cache)
-.cache/
-whatsapp-web-server/.cache/
