@@ -80,5 +80,5 @@ not_contacted → first_message_sent → in_conversation → booked
 - Webhook must return 200 OK within 3 seconds — heavy work (Gemini call) is offloaded to FastAPI BackgroundTasks
 - Follow-up scheduler uses APScheduler — will fail silently in serverless environments
 - Deployment is Docker Compose on a Google Cloud VM. `gcp-vm-setup.sh` provisions the VM from your laptop; `deploy.sh` runs on the VM to build and restart the stack. See [impcmds.md](impcmds.md) for day-to-day commands.
-- The stack is four containers: `postgres`, `python-api`, `whatsapp-server`, and `nginx` (serves the built React dashboard and proxies the API on port 80)
+- The stack is three containers: `python-api`, `whatsapp-server`, and `nginx` (serves the built React dashboard and proxies the API on port 80). Postgres is managed externally (Supabase) via `DATABASE_URL`
 - The WhatsApp gateway runs headless Chrome and needs ~2 GB RAM, which is why `gcp-vm-setup.sh` defaults to an `e2-standard-2` VM

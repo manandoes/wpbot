@@ -41,7 +41,7 @@ fi
 
 if grep -q "change_me" .env 2>/dev/null; then
     echo "⚠️   WARNING: .env still has placeholder values."
-    echo "    Update POSTGRES_PASSWORD, ADMIN_PASSWORD, JWT_SECRET before continuing."
+    echo "    Update DATABASE_URL, ADMIN_PASSWORD, JWT_SECRET, GATEWAY_TOKEN before continuing."
     read -rp "Continue anyway? [y/N] " yn
     [[ "$yn" =~ ^[Yy]$ ]] || exit 1
 fi

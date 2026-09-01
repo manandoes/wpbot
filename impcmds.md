@@ -72,10 +72,12 @@ Easiest — the API does all three steps at once:
 curl -X DELETE http://<VM-IP>/contact/919876543210/reset
 ```
 
-Or by hand in the database:
+Or by hand in the database (Supabase — use the SQL editor in the dashboard, or
+psql from the VM):
 
 ```bash
-cd ~/wpbot && docker compose exec postgres psql -U wpbot -d wpbot
+cd ~/wpbot && docker compose exec python-api python -c     "import os; print(os.environ['DATABASE_URL'])"   # the connection string
+psql "$DATABASE_URL"
 ```
 
 ```sql
