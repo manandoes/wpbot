@@ -23,6 +23,27 @@ bash gcp-vm-setup.sh
 Creates the VM, opens ports 80/443, installs Docker, clones the repo, copies
 `.env` up, and runs `deploy.sh`.
 
+## Database connection string (important)
+
+Supabase's direct host — `db.<ref>.supabase.co` — resolves to **IPv6 only**.
+A default GCE VM is IPv4-only, so the API container cannot reach it and every
+request fails on connect. Use the **Supavisor session pooler** instead, which
+has an IPv4 address:
+
+```
+DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+```
+
+Grab the exact string from Supabase → Project Settings → Database →
+Connection string → **Session pooler**. Session mode (port 5432), not
+transaction mode (6543) — `db/__init__.py` keeps a long-lived SQLAlchemy pool.
+
+Check it from the VM before deploying:
+
+```bash
+getent hosts aws-0-<region>.pooler.supabase.com   # must print an IPv4 address
+```
+
 ## SSH in
 
 ```bash
