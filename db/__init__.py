@@ -19,6 +19,11 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set in .env")
 
+# Render (and Heroku-style providers) hand out `postgres://` URLs, a scheme
+# SQLAlchemy 2.x no longer recognises. Normalise it to the psycopg2 dialect.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 # PostgreSQL connection pool settings
 engine = create_engine(
     DATABASE_URL,

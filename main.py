@@ -25,7 +25,13 @@ from dotenv import load_dotenv
 from db import init_db, SessionLocal
 from db.models import Contact, Conversation, Registration
 from bot.conversation import handle_message
-from bot.whatsapp_web import parse_incoming, get_client_status, get_qr_code, send_message
+from bot.whatsapp_web import (
+    parse_incoming,
+    get_client_status,
+    get_qr_code,
+    normalize_phone,
+    send_message,
+)
 from bot.followup import start_scheduler, stop_scheduler
 from outreach.bulk_sender import run_bulk_outreach
 from admin.routes import router as admin_router
@@ -286,11 +292,15 @@ async def send_single_message(body: SendMessageRequest):
     if not expected_key or body.api_key != expected_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    success = send_message(body.phone_number, body.message)
+    phone_number = normalize_phone(body.phone_number)
+    if not phone_number:
+        raise HTTPException(status_code=400, detail="Not a valid phone number")
+
+    success = send_message(phone_number, body.message)
     if not success:
         raise HTTPException(status_code=502, detail="Failed to send message via WhatsApp")
 
-    return {"success": True, "phone_number": body.phone_number}
+    return {"success": True, "phone_number": phone_number}
 
 
 def _run_outreach_background() -> None:

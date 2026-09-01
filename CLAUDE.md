@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WhatsApp Sales Bot — an outbound WhatsApp chatbot powered by **whatsapp-web.js** and **Google Gemini AI** (gemini-2.0-flash). It proactively reaches out to cold contacts, qualifies them, pitches the ₹99 *Jira with AI Masterclass* by Coach Yogesh Vats, handles objections, and drives bookings.
+WhatsApp Sales Bot — an outbound WhatsApp chatbot powered by **whatsapp-web.js** and **Google Gemini AI** (Gemini 3 Flash Live). It proactively reaches out to cold contacts, qualifies them, pitches the ₹99 *Jira with AI Masterclass* by Coach Yogesh Vats, handles objections, and drives bookings.
 
 ## Commands
 
@@ -32,6 +32,8 @@ Required in `.env`:
 - `DATABASE_URL` — PostgreSQL connection string (e.g., `postgresql://user:pass@host/db`)
 - `GEMINI_API_KEY` — Google Gemini API key
 - `WHATSAPP_WEB_SERVER_URL` — URL of Node.js whatsapp-web.js server (default: `http://localhost:3000`)
+- `GATEWAY_TOKEN` — shared secret for the gateway's write endpoints; must match on both services. Blank locally disables the check.
+- `WWEBJS_DATA_PATH` — directory for the WhatsApp session (Render disk mount; blank = `whatsapp-web-server/`)
 
 ## Architecture
 
@@ -76,3 +78,5 @@ not_contacted → first_message_sent → in_conversation → booked
 - The WhatsApp Web client runs as a separate Node.js process in `whatsapp-web-server/`
 - Webhook must return 200 OK within 3 seconds — heavy work (Gemini call) is offloaded to FastAPI BackgroundTasks
 - Follow-up scheduler uses APScheduler — will fail silently in serverless environments
+- Deployment is Render-only (see [RENDER.md](RENDER.md) and [render.yaml](render.yaml)). The Docker/GCP setup was removed — do not reintroduce Dockerfiles or compose files.
+- The WhatsApp gateway needs ~2 GB RAM for headless Chrome and a persistent disk for its session, so it cannot run on Render's free plan

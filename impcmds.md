@@ -1,27 +1,50 @@
+## Wipe the previous WhatsApp session (get a fresh QR)
 
-## wipe the previous session
-cd ~/wpbot
-docker compose down
-docker volume rm wpbot_whatsapp_session wpbot_whatsapp_cache
-docker compose up -d
+The gateway clears `.wwebjs_auth` / `.wwebjs_cache` on the mounted disk and
+re-initialises itself:
 
+```bash
+curl -X POST -H "Authorization: Bearer $GATEWAY_TOKEN" \
+  https://wpbot-whatsapp.onrender.com/reconnect
+```
 
-## Start the server, on gcp
-gcloud compute ssh instance-20260520-212946 --project=you-tube-automation-493118 --zone=us-central1-a
+Then fetch the new QR (or read it off the gateway's logs):
 
-sudo su - Dell
-cd ~/wpbot
-bash deploy.sh
+```bash
+curl -H "Authorization: Bearer $GATEWAY_TOKEN" \
+  https://wpbot-whatsapp.onrender.com/qr
+```
 
+## Deploy
 
-## Delete history of specific user
-1. get into DB
-cd ~/wpbot && docker compose exec postgres psql -U wpbot -d wpbot
-2. Delete history
+Render auto-deploys on push to `main`. To force one:
+Render Dashboard → service → **Manual Deploy** → *Deploy latest commit*.
+
+## Delete history of a specific user
+
+Easiest — the API does all three steps at once:
+
+```bash
+curl -X DELETE https://wpbot-api.onrender.com/contact/919876543210/reset
+```
+
+Or by hand against the database. Grab the **External Database URL** from
+Render Dashboard → `wpbot-db` → Connections:
+
+```bash
+psql "<external-database-url>"
+```
+
+```sql
 DELETE FROM conversations WHERE phone_number = '919876543210';
-3. Reset status
 UPDATE contacts SET status = 'not_contacted' WHERE phone_number = '919876543210';
-4.Exit:  \q
+\q
+```
 
+## Logs
 
- 
+Render Dashboard → service → **Logs**, or with the Render CLI:
+
+```bash
+render logs -r wpbot-whatsapp --tail
+```

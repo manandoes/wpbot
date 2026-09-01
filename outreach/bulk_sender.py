@@ -15,6 +15,7 @@ import pandas as pd
 from db import SessionLocal
 from db.models import Contact
 from bot.conversation import initiate_conversation
+from bot.whatsapp_web import normalize_phone
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +65,11 @@ def run_bulk_outreach() -> dict:
     db = SessionLocal()
     try:
         for _, row in df.iterrows():
-            phone = str(row.get("phone_number", "")).strip().lstrip("+").replace(" ", "")
+            phone = normalize_phone(row.get("phone_number", ""))
             name = str(row.get("name", "")).strip() if "name" in df.columns else ""
 
             if not phone:
-                logger.warning("Empty phone number in CSV row — skipping.")
+                logger.warning("Unusable phone number in CSV row — skipping.")
                 stats["failed"] += 1
                 continue
 

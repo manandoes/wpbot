@@ -1,6 +1,6 @@
 # WhatsApp Sales Bot — Jira with AI Masterclass
 
-An outbound WhatsApp chatbot powered by **whatsapp-web.js** (Node.js) and **Google Gemini AI (gemini-2.0-flash)**. It proactively reaches out to cold contacts, qualifies them, pitches the ₹99 *Jira with AI Masterclass* by Coach Yogesh Vats, handles objections, and drives bookings.
+An outbound WhatsApp chatbot powered by **whatsapp-web.js** (Node.js) and **Google Gemini AI (Gemini 3 Flash Live)**. It proactively reaches out to cold contacts, qualifies them, pitches the ₹99 *Jira with AI Masterclass* by Coach Yogesh Vats, handles objections, and drives bookings.
 
 ---
 

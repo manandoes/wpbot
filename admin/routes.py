@@ -12,7 +12,13 @@ from fastapi.responses import JSONResponse
 
 from db import SessionLocal
 from db.models import Contact, Conversation, Registration
-from bot.whatsapp_web import get_client_status, get_qr_code, reconnect_client, send_message
+from bot.whatsapp_web import (
+    get_client_status,
+    get_qr_code,
+    normalize_phone,
+    reconnect_client,
+    send_message,
+)
 
 from .auth import create_access_token, get_current_admin, verify_password
 from .schemas import (
@@ -243,15 +249,21 @@ def _upsert_contact_and_save(db, phone_number: str, name: Optional[str], message
 
 @router.post("/send-message")
 def admin_send_message(body: SendMessageRequest, _: str = Depends(get_current_admin)):
-    success = send_message(body.phone_number, body.message)
+    # Store the contact under the same number the gateway dials, so a typed
+    # "+91 99975 89540" cannot become a second row alongside "919997589540".
+    phone_number = normalize_phone(body.phone_number)
+    if not phone_number:
+        raise HTTPException(status_code=400, detail="Not a valid phone number")
+
+    success = send_message(phone_number, body.message)
     if not success:
         raise HTTPException(status_code=502, detail="Failed to send message via WhatsApp")
     db = SessionLocal()
     try:
-        _upsert_contact_and_save(db, body.phone_number, None, body.message)
+        _upsert_contact_and_save(db, phone_number, None, body.message)
     finally:
         db.close()
-    return {"success": True, "phone_number": body.phone_number}
+    return {"success": True, "phone_number": phone_number}
 
 
 @router.post("/bulk-send", response_model=BulkSendResult)

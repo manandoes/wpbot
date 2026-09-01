@@ -1,14 +1,17 @@
 """
 bot/gemini_agent.py
-NVIDIA NIM API (DeepSeek V4 Pro) AI integration — Coach Yogesh Vats.
+Google Gemini Live API (Gemini 3 Flash Live) AI integration — Coach Yogesh Vats.
 """
 
+import asyncio
 import logging
 import os
 from datetime import date, timedelta
 from typing import List, Dict
 
-from openai import OpenAI, APIError
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -164,25 +167,64 @@ def _select_prompt(contact_status: str) -> str:
     return template.replace("{next_class_date}", _next_sunday_label())
 
 # ---------------------------------------------------------------------------
-# NVIDIA NIM client setup
+# Gemini Live API client setup
 # ---------------------------------------------------------------------------
 
-MODEL_ID = "deepseek-ai/deepseek-v4-pro"
-NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
+MODEL_ID = "gemini-3.1-flash-live-preview"
 
 FALLBACK_MESSAGE = "Apologies, I ran into a brief technical issue. Please give me a moment and try again."
 
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-if NVIDIA_API_KEY:
-    _client = OpenAI(
-        base_url=NIM_BASE_URL,
-        api_key=NVIDIA_API_KEY,
-    )
-    logger.info("NVIDIA NIM client initialised. Model: %s", MODEL_ID)
+if GEMINI_API_KEY:
+    _client = genai.Client(api_key=GEMINI_API_KEY)
+    logger.info("Gemini Live client initialised. Model: %s", MODEL_ID)
 else:
     _client = None
-    logger.warning("NVIDIA_API_KEY not set — NIM agent will return fallback messages.")
+    logger.warning("GEMINI_API_KEY not set — Gemini agent will return fallback messages.")
+
+
+# ---------------------------------------------------------------------------
+# Live session
+# ---------------------------------------------------------------------------
+
+async def _run_live_turn(system_prompt: str, turns: List[Dict]) -> str:
+    """
+    Open a Live API session, replay the conversation as the turn history, and
+    collect the model's reply.
+
+    The Live API is session-based, so each reply gets its own short-lived
+    WebSocket connection — history is re-sent every time rather than kept
+    server-side.
+
+    Gemini 3 Flash Live is an audio-native model and rejects a TEXT response
+    modality, so the session runs in AUDIO mode with output transcription on.
+    The audio frames are discarded; the transcript is what goes to WhatsApp.
+    """
+    config = types.LiveConnectConfig(
+        response_modalities=["AUDIO"],
+        output_audio_transcription=types.AudioTranscriptionConfig(),
+        system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
+    )
+
+    chunks: List[str] = []
+
+    async with _client.aio.live.connect(model=MODEL_ID, config=config) as session:
+        await session.send_client_content(turns=turns, turn_complete=True)
+
+        async for response in session.receive():
+            server_content = response.server_content
+            if not server_content:
+                continue
+
+            transcription = server_content.output_transcription
+            if transcription and transcription.text:
+                chunks.append(transcription.text)
+
+            if server_content.turn_complete:
+                break
+
+    return "".join(chunks).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +237,7 @@ def get_reply(
     contact_status: str = "not_contacted",
 ) -> str:
     """
-    Generate a reply from DeepSeek on NVIDIA NIM based on the full conversation history.
+    Generate a reply from Gemini 3 Flash Live based on the full conversation history.
 
     Args:
         conversation_history: List of dicts with keys "role" and "message".
@@ -208,35 +250,34 @@ def get_reply(
         The model's reply as a plain string, or a fallback string on any error.
     """
     if _client is None:
-        logger.error("NVIDIA NIM client not initialised — returning fallback.")
+        logger.error("Gemini Live client not initialised — returning fallback.")
         return FALLBACK_MESSAGE
 
     system_prompt = _select_prompt(contact_status)
     logger.debug("Using %s prompt for status=%s", "interested" if contact_status in _WARM_STATUSES else "cold", contact_status)
 
-    # ── Build messages list (OpenAI format) ───────────────────────────────
-    messages = [{"role": "system", "content": system_prompt}]
+    # ── Build the turn history (Live API content format) ──────────────────
+    turns: List[Dict] = []
 
     for entry in conversation_history:
-        role = entry.get("role", "user")
-        if role == "model":
-            role = "assistant"
-        messages.append({"role": role, "content": entry.get("message", "")})
+        role = "model" if entry.get("role") == "model" else "user"
+        turns.append({"role": role, "parts": [{"text": entry.get("message", "")}]})
 
-    messages.append({"role": "user", "content": user_message})
+    turns.append({"role": "user", "parts": [{"text": user_message}]})
 
     try:
-        response = _client.chat.completions.create(
-            model=MODEL_ID,
-            messages=messages,
-            max_tokens=120,
-            temperature=0.75,
-        )
-        reply_text = response.choices[0].message.content.strip()
+        reply_text = asyncio.run(_run_live_turn(system_prompt, turns))
+        if not reply_text:
+            logger.error("Gemini Live returned an empty reply — returning fallback.")
+            return FALLBACK_MESSAGE
+
         reply_text = reply_text.replace("*", "")
-        logger.info("NIM reply generated (%d chars).", len(reply_text))
+        logger.info("Gemini Live reply generated (%d chars).", len(reply_text))
         return reply_text
 
     except APIError as exc:
-        logger.exception("NVIDIA NIM API error: %s", exc)
+        logger.exception("Gemini Live API error: %s", exc)
+        return FALLBACK_MESSAGE
+    except Exception as exc:  # WebSocket / connection failures are not APIError
+        logger.exception("Gemini Live session failed: %s", exc)
         return FALLBACK_MESSAGE

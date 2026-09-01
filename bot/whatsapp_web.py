@@ -7,6 +7,7 @@ This replaces the Meta Cloud API integration with a local WhatsApp Web connectio
 
 import logging
 import os
+import re
 from typing import Optional
 
 import httpx
@@ -20,8 +21,34 @@ logger = logging.getLogger(__name__)
 WHATSAPP_WEB_SERVER_URL = os.getenv("WHATSAPP_WEB_SERVER_URL", "http://localhost:3000")
 TIMEOUT = 10.0
 
+# Shared secret for the gateway's write endpoints. On Render the gateway is
+# reachable over the public internet, so this is what stops anyone else from
+# sending messages through it. Must match GATEWAY_TOKEN on the Node service.
+GATEWAY_TOKEN = os.getenv("GATEWAY_TOKEN", "")
+
+_auth_headers = {"Authorization": f"Bearer {GATEWAY_TOKEN}"} if GATEWAY_TOKEN else {}
+
+
+def normalize_phone(value: str) -> str:
+    """
+    Reduce any identifier to the bare mobile number this project keys on.
+
+    Contacts are identified by their number everywhere — the DB, the dashboard,
+    the gateway's /send. WhatsApp's own address forms must never get that far:
+    the digits of a "…@c.us" are the number, but a "…@lid" is opaque and can
+    never be dialled, so it is rejected outright instead of being stripped to
+    meaningless digits.
+
+    Returns "" when the value cannot be used as a phone number.
+    """
+    raw = str(value or "").strip()
+    if raw.endswith("@lid"):
+        return ""
+    return re.sub(r"\D", "", raw.split("@")[0])
+
+
 # Persistent client — reuses TCP connections across calls
-_http = httpx.Client(timeout=TIMEOUT)
+_http = httpx.Client(timeout=TIMEOUT, headers=_auth_headers)
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +122,11 @@ def send_media_base64(
     Send a WhatsApp message with base64-encoded media via the Node.js server.
     Used to forward payment screenshots to the admin number.
     """
+    phone_number = normalize_phone(phone_number)
+    if not phone_number:
+        logger.error("Refusing to send media — not a usable phone number.")
+        return False
+
     try:
         payload = {
             "phone_number": phone_number,
@@ -129,6 +161,11 @@ def send_message(phone_number: str, message_text: str, media_url: Optional[str] 
     Returns:
         True on success, False on failure.
     """
+    phone_number = normalize_phone(phone_number)
+    if not phone_number:
+        logger.error("Refusing to send message — not a usable phone number.")
+        return False
+
     try:
         payload = {
             "phone_number": phone_number,
@@ -180,7 +217,7 @@ def parse_incoming(payload: dict) -> Optional[dict]:
     Returns None only if phone_number is missing or both text and media are absent.
     """
     try:
-        phone_number = payload.get("phone_number", "").strip()
+        phone_number = normalize_phone(payload.get("phone_number", ""))
         message_text = payload.get("message_text", "").strip()
         timestamp = payload.get("timestamp")
         contact_name = payload.get("contact_name", "")
@@ -190,7 +227,10 @@ def parse_incoming(payload: dict) -> Optional[dict]:
         media_filename = payload.get("media_filename", "attachment")
 
         if not phone_number:
-            logger.warning("Received message with missing phone number.")
+            logger.warning(
+                "Received message with no usable phone number (%r) — ignoring.",
+                payload.get("phone_number", ""),
+            )
             return None
 
         if not message_text and not has_media:
