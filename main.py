@@ -15,6 +15,8 @@ Endpoints:
 
 import logging
 import os
+import threading
+from collections import OrderedDict
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -171,6 +173,30 @@ async def get_qr():
 # Routes — Webhooks
 # ---------------------------------------------------------------------------
 
+# The gateway drops repeat deliveries it can see, but a retried HTTP POST or a
+# gateway restart mid-forward can still land the same message here twice — and
+# each copy would produce its own Gemini reply. Message ids are unique per
+# message, so remembering the ones already accepted makes the webhook
+# idempotent. Bounded, and guarded because BackgroundTasks run on a threadpool.
+_SEEN_MESSAGE_LIMIT = 5000
+_seen_message_ids: "OrderedDict[str, None]" = OrderedDict()
+_seen_lock = threading.Lock()
+
+
+def _already_handled(message_id: str) -> bool:
+    """True if this message id has been accepted before. Records it if not."""
+    if not message_id:
+        return False  # nothing to key on — better to answer than to drop
+
+    with _seen_lock:
+        if message_id in _seen_message_ids:
+            return True
+        _seen_message_ids[message_id] = None
+        while len(_seen_message_ids) > _SEEN_MESSAGE_LIMIT:
+            _seen_message_ids.popitem(last=False)
+    return False
+
+
 @app.post("/webhook/whatsapp-web", tags=["WhatsApp"])
 async def receive_message_from_web(request: Request, background_tasks: BackgroundTasks):
     """
@@ -191,6 +217,10 @@ async def receive_message_from_web(request: Request, background_tasks: Backgroun
     if parsed is None:
         logger.debug("Ignoring unparseable message: %s", payload)
         return JSONResponse(content={"status": "ignored"}, status_code=200)
+
+    if _already_handled(parsed["message_id"]):
+        logger.info("Duplicate delivery of message %s — ignoring.", parsed["message_id"])
+        return JSONResponse(content={"status": "duplicate"}, status_code=200)
 
     phone_number = parsed["phone_number"]
     message_text = parsed["message_text"]

@@ -219,6 +219,7 @@ def parse_incoming(payload: dict) -> Optional[dict]:
     try:
         phone_number = normalize_phone(payload.get("phone_number", ""))
         message_text = payload.get("message_text", "").strip()
+        message_id = str(payload.get("message_id", "") or "")
         timestamp = payload.get("timestamp")
         contact_name = payload.get("contact_name", "")
         has_media = bool(payload.get("has_media", False))
@@ -240,6 +241,7 @@ def parse_incoming(payload: dict) -> Optional[dict]:
         return {
             "phone_number": phone_number,
             "message_text": message_text,
+            "message_id": message_id,
             "timestamp": timestamp,
             "contact_name": contact_name,
             "has_media": has_media,

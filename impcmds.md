@@ -106,3 +106,9 @@ DELETE FROM conversations WHERE phone_number = '919876543210';
 UPDATE contacts SET status = 'not_contacted' WHERE phone_number = '919876543210';
 \q
 ```
+
+
+## Edit .env file
+nano ~/wpbot/.env
+make changes
+CTRl+O > enter > CTRL+X

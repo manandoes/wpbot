@@ -34,6 +34,42 @@ RE_ENGAGE_TEMPLATE = (
 
 
 # ---------------------------------------------------------------------------
+# Claiming
+# ---------------------------------------------------------------------------
+
+def _claim(db, contact, from_status: str) -> bool:
+    """
+    Move a contact out of `from_status` *before* messaging them, and report
+    whether this runner is the one that got it.
+
+    The claim is what makes the job safe to run more than once. Marking the
+    contact only after a successful send leaves a window in which a second
+    runner — a second API process, or an overlapping run — reads the same row
+    and sends the same follow-up again, which is exactly how a contact ends up
+    with two identical messages at once.
+    """
+    claimed = (
+        db.query(Contact)
+        .filter(Contact.id == contact.id, Contact.status == from_status)
+        .update(
+            {"status": "follow_up_sent", "last_contacted_at": datetime.utcnow()},
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    return bool(claimed)
+
+
+def _release(db, contact, to_status: str, last_contacted_at) -> None:
+    """Undo a claim whose send failed, so the contact is picked up next run."""
+    db.query(Contact).filter(Contact.id == contact.id).update(
+        {"status": to_status, "last_contacted_at": last_contacted_at},
+        synchronize_session=False,
+    )
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
 # Job
 # ---------------------------------------------------------------------------
 
@@ -63,14 +99,16 @@ def send_followups() -> None:
         logger.info("Follow-up job (no reply): %d contacts.", len(no_reply))
 
         for contact in no_reply:
+            previous_contact_at = contact.last_contacted_at
+            if not _claim(db, contact, "first_message_sent"):
+                logger.info("Follow-up for %s already claimed — skipping.", contact.phone_number)
+                continue
+
             name = contact.name.split()[0] if contact.name else "there"
-            success = send_message(contact.phone_number, FOLLOW_UP_TEMPLATE.format(name=name))
-            if success:
-                contact.status = "follow_up_sent"
-                contact.last_contacted_at = datetime.utcnow()
-                db.commit()
+            if send_message(contact.phone_number, FOLLOW_UP_TEMPLATE.format(name=name)):
                 logger.info("Follow-up (no reply) sent to %s.", contact.phone_number)
             else:
+                _release(db, contact, "first_message_sent", previous_contact_at)
                 logger.warning("Failed follow-up (no reply) to %s.", contact.phone_number)
 
         # ── Pass 2: said not interested — re-engage next day ──────────────
@@ -85,14 +123,16 @@ def send_followups() -> None:
         logger.info("Follow-up job (not interested): %d contacts.", len(not_interested))
 
         for contact in not_interested:
+            previous_contact_at = contact.last_contacted_at
+            if not _claim(db, contact, "not_interested"):
+                logger.info("Re-engage for %s already claimed — skipping.", contact.phone_number)
+                continue
+
             name = contact.name.split()[0] if contact.name else "there"
-            success = send_message(contact.phone_number, RE_ENGAGE_TEMPLATE.format(name=name))
-            if success:
-                contact.status = "follow_up_sent"
-                contact.last_contacted_at = datetime.utcnow()
-                db.commit()
+            if send_message(contact.phone_number, RE_ENGAGE_TEMPLATE.format(name=name)):
                 logger.info("Re-engage follow-up sent to %s.", contact.phone_number)
             else:
+                _release(db, contact, "not_interested", previous_contact_at)
                 logger.warning("Failed re-engage follow-up to %s.", contact.phone_number)
 
     except Exception as exc:

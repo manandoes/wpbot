@@ -6,7 +6,7 @@ Google Gemini Live API (Gemini 3 Flash Live) AI integration — Coach Yogesh Vat
 import asyncio
 import logging
 import os
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict
 
 from google import genai
@@ -19,8 +19,45 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+# The masterclass runs every Sunday, 11:00 AM - 1:00 PM IST. The date is
+# derived from the clock rather than hardcoded, so the prompt never quotes a
+# class that has already happened.
+CLASS_WEEKDAY = 6            # Monday=0 ... Sunday=6
+CLASS_START_HOUR = 11        # 11:00 AM IST
+CLASS_TIME_LABEL = "11:00 AM – 1:00 PM IST"
+
+# India has no DST, so a fixed offset is exact and avoids depending on the
+# system tz database being present in the container.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _ordinal(day: int) -> str:
+    """1 -> '1st', 2 -> '2nd', 11 -> '11th', 23 -> '23rd'."""
+    if 11 <= day % 100 <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def _next_class_date(now: datetime | None = None) -> datetime:
+    """
+    The date of the next Sunday session in IST.
+
+    Today counts only while the session has not started yet; once 11:00 AM IST
+    on a Sunday has passed, the next class is a week out.
+    """
+    now = now or datetime.now(IST)
+    days_ahead = (CLASS_WEEKDAY - now.weekday()) % 7
+    if days_ahead == 0 and now.hour >= CLASS_START_HOUR:
+        days_ahead = 7
+    return now + timedelta(days=days_ahead)
+
+
 def _next_sunday_label() -> str:
-    return "13th June"
+    """e.g. 'Sunday, 7th September'."""
+    class_day = _next_class_date()
+    return f"Sunday, {_ordinal(class_day.day)} {class_day.strftime('%B')}"
 
 # ---------------------------------------------------------------------------
 # Shared signal rules (appended to both prompts)
@@ -98,7 +135,7 @@ Step 5 — Invite: Only after they understand the value, ask if they want the re
 
 ## Product
 - Jira with AI Masterclass — LIVE 2-hour online session
-- Date: {next_class_date} at 7:00 PM – 9:00 PM IST
+- Date: {next_class_date} at {class_time} (the class runs every Sunday morning)
 - Fee: ₹99 only
 - Format: Live only. No recordings.
 - Registration link: https://coachyogeshvats.com/2-hours-live-masterclass/
@@ -109,7 +146,7 @@ Step 5 — Invite: Only after they understand the value, ask if they want the re
 - "Where did you get my number?" → Acknowledge it politely, offer to stop, ask if the topic sounds useful.
 - "Not interested" (first time) → "No worries! Can I ask — is it that Jira is not relevant for you, or just not the right time?"
 - "Not interested" (second time) → Close gracefully. Do not push further.
-- "Too busy" → "Totally fair — it is just 2 hours on Friday evening, 13th June, 7–9 PM. Practical enough that you can use it the same week."
+- "Too busy" → "Totally fair — it is just 2 hours: {next_class_date}, {class_time}. A Sunday morning, so it does not touch your work week."
 - "Worth ₹99?" → "One workflow from the session can save you hours every week. And you can ask me directly during the live."
 - "Is there a recording?" → "No recording — live only, so you can ask me anything in real-time."
 """ + _SIGNAL_RULES
@@ -134,7 +171,7 @@ Same as always — a knowledgeable friend, not a salesperson. Casual, warm, resp
 
 ## Product
 - Jira with AI Masterclass — LIVE 2-hour online session
-- Date: {next_class_date} at 7:00 PM – 9:00 PM IST
+- Date: {next_class_date} at {class_time} (the class runs every Sunday morning)
 - Fee: ₹99 only
 - Format: Live only. No recordings.
 - Registration link: https://coachyogeshvats.com/2-hours-live-masterclass/
@@ -164,7 +201,11 @@ _WARM_STATUSES = {"in_conversation", "follow_up_sent"}
 
 def _select_prompt(contact_status: str) -> str:
     template = INTERESTED_SYSTEM_PROMPT if contact_status in _WARM_STATUSES else COLD_SYSTEM_PROMPT
-    return template.replace("{next_class_date}", _next_sunday_label())
+    return (
+        template
+        .replace("{next_class_date}", _next_sunday_label())
+        .replace("{class_time}", CLASS_TIME_LABEL)
+    )
 
 # ---------------------------------------------------------------------------
 # Gemini Live API client setup

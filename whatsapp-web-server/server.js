@@ -45,6 +45,37 @@ let clientReady = false;
 let clientQRCode = null;
 let client;
 
+// -------------------------------------------------------------------------
+// Inbound de-duplication
+//
+// WhatsApp Web re-delivers messages whenever the page reloads and re-syncs,
+// and the 'message' event fires once per live client if a second one ever
+// attaches to the same session. Forwarding the same message twice makes the
+// bot answer it twice, so remember the ids already sent to Python. Ids are
+// unique per message, and the set is bounded so a long-running gateway cannot
+// grow it without limit.
+// -------------------------------------------------------------------------
+
+const SEEN_LIMIT = 5000;
+const seenMessages = new Set();
+
+function messageKey(message) {
+  return (message.id && (message.id._serialized || message.id.id)) || '';
+}
+
+function alreadySeen(message) {
+  const key = messageKey(message);
+  if (!key) return false; // nothing to key on - let it through rather than drop it
+  if (seenMessages.has(key)) return true;
+
+  seenMessages.add(key);
+  if (seenMessages.size > SEEN_LIMIT) {
+    // Sets iterate in insertion order, so this evicts the oldest id.
+    seenMessages.delete(seenMessages.values().next().value);
+  }
+  return false;
+}
+
 function createClient() {
   const c = new Client({
     authStrategy: new LocalAuth({ clientId: SESSION_NAME, dataPath: AUTH_DIR }),
@@ -109,6 +140,11 @@ function createClient() {
         return;
       }
 
+      if (alreadySeen(message)) {
+        console.log(`Duplicate delivery of ${messageKey(message)} - ignoring.`);
+        return;
+      }
+
       const contact = await message.getContact();
       const phoneNumber = await toPhoneNumber(message.from, contact);
 
@@ -127,7 +163,7 @@ function createClient() {
         message_text: message.body || '',
         timestamp: message.timestamp,
         contact_name: contactName,
-        message_id: message.id.id,
+        message_id: messageKey(message), // serialized id - Python de-duplicates on it
         has_media: false,
       };
 
@@ -181,6 +217,10 @@ function createClient() {
 
 const READY_TIMEOUT_MS = 60000;
 const SEND_ATTEMPTS = 3;
+
+// How far back to look for an identical message when deciding whether a failed
+// send actually went out. Comfortably longer than the retry backoff.
+const DUPLICATE_WINDOW_SECONDS = 120;
 
 const TRANSIENT_ERRORS = [
   'Execution context was destroyed',
@@ -329,11 +369,40 @@ async function chatAddresses(phoneNumber) {
   return [primary];
 }
 
+// A transient failure does not tell us whether the message left before the
+// page died - whatsapp-web.js throws while reading the result back, which is
+// after WhatsApp has already accepted it. Ask WhatsApp instead: if an
+// identical outgoing message is sitting in the chat, the send did land, and
+// retrying would post it a second time.
+async function findRecentlySent(chatId, content, options) {
+  const body = typeof content === 'string' ? content : (options && options.caption) || '';
+  if (!body) return null; // media with no caption - nothing to match on
+
+  try {
+    const chat = await client.getChatById(chatId);
+    const recent = await chat.fetchMessages({ limit: 10 });
+    const cutoff = Math.floor(Date.now() / 1000) - DUPLICATE_WINDOW_SECONDS;
+    return recent.find((m) => m.fromMe && m.timestamp >= cutoff && m.body === body) || null;
+  } catch (error) {
+    console.warn(`Could not check ${chatId} for an already-sent copy: ${error.message}`);
+    return null;
+  }
+}
+
 async function sendWithRetry(chatId, content, options) {
   let lastError;
 
   for (let attempt = 1; attempt <= SEND_ATTEMPTS; attempt++) {
     await waitForReady();
+
+    if (attempt > 1) {
+      const already = await findRecentlySent(chatId, content, options);
+      if (already) {
+        console.log(`Message already delivered to ${chatId} despite the error - not resending.`);
+        return already;
+      }
+    }
+
     try {
       const sent = options
         ? await client.sendMessage(chatId, content, options)
@@ -589,30 +658,58 @@ app.listen(SERVER_PORT, () => {
  * gateway down with it, losing the HTTP server too. These failures are
  * usually transient, so back off and rebuild the client instead of exiting.
  */
-async function startClient(attempt = 1) {
+// Only one client may be live at a time. Two clients on the same session each
+// receive every incoming message, so the bot would reply to each message twice.
+// A /reconnect while a retry chain is still backing off used to do exactly
+// that, so every start claims a generation and stale chains bow out.
+let clientGeneration = 0;
+let retryTimer = null;
+
+async function startClient(attempt = 1, generation = null) {
+  if (generation === null) {
+    // A fresh start (boot or /reconnect) supersedes any chain still retrying.
+    generation = ++clientGeneration;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  } else if (generation !== clientGeneration) {
+    console.log('Superseded by a newer client - abandoning this retry chain.');
+    return;
+  }
+
   console.log(
     attempt === 1
       ? '🔄 Initializing WhatsApp Web client...'
       : `🔄 Reinitializing WhatsApp Web client (attempt ${attempt})...`
   );
 
-  client = createClient();
+  // Held locally as well as globally: a /reconnect during initialize() swaps
+  // the global out from under us, and the cleanup below must tear down *this*
+  // client rather than whichever one is current by then.
+  const c = createClient();
+  client = c;
 
   try {
-    await client.initialize();
+    await c.initialize();
   } catch (err) {
-    clientReady = false;
     console.error(`❌ WhatsApp client failed to initialize: ${err?.message || err}`);
 
     // Drop the half-built browser so the retry starts from a clean profile
     // lock; destroy() itself throws if the process is already gone.
     try {
-      await client.destroy();
+      await c.destroy();
     } catch (_) { /* already gone */ }
+
+    // A /reconnect may have started a newer client while initialize() was
+    // running; leave that one alone rather than racing it with a retry.
+    if (generation !== clientGeneration) return;
+
+    clientReady = false;
 
     const delayMs = Math.min(60000, 5000 * 2 ** (attempt - 1));
     console.log(`⏳ Retrying in ${Math.round(delayMs / 1000)}s...`);
-    setTimeout(() => startClient(attempt + 1), delayMs);
+    retryTimer = setTimeout(() => startClient(attempt + 1, generation), delayMs);
   }
 }
 

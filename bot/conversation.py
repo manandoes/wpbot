@@ -4,6 +4,7 @@ Manages per-contact conversation state and orchestrates Gemini replies.
 """
 
 import logging
+import threading
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -145,6 +146,20 @@ def _handle_registration_step(
 # Public API
 # ---------------------------------------------------------------------------
 
+# Replies are produced on FastAPI's background threadpool, so two messages from
+# the same contact arriving together are handled concurrently: both would read
+# the history before either saved its reply, and the contact would receive two
+# overlapping answers at once. One lock per number serialises them, so the
+# second message is answered in the light of the first exchange.
+_contact_locks: dict = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(phone_number: str) -> threading.Lock:
+    with _locks_guard:
+        return _contact_locks.setdefault(phone_number, threading.Lock())
+
+
 def handle_message(
     phone_number: str,
     incoming_text: str,
@@ -156,7 +171,20 @@ def handle_message(
     Full pipeline for an incoming WhatsApp message.
     Routes to the registration form if a booking is in progress,
     otherwise runs the normal Gemini AI conversation.
+
+    Serialised per contact — see _lock_for.
     """
+    with _lock_for(phone_number):
+        _handle_message(phone_number, incoming_text, has_media, media_data, media_mimetype)
+
+
+def _handle_message(
+    phone_number: str,
+    incoming_text: str,
+    has_media: bool,
+    media_data: str,
+    media_mimetype: str,
+) -> None:
     db: Session = SessionLocal()
     try:
         # ── Contact record ─────────────────────────────────────────────────
