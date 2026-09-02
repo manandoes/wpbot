@@ -36,17 +36,25 @@ class Registration(Base):
     """
     Tracks registration details collected after a user confirms booking.
 
-    Stage flow:
-        awaiting_name → awaiting_email → awaiting_payment → complete
+    Stage flow (see bot/registration.py):
+        link_sent → awaiting_registration_confirm → awaiting_screenshot → complete
+                                                            ↓
+                                        awaiting_name → awaiting_email → complete
+
+    followup_due_at is when the "did you register?" check-in is next owed;
+    NULL means nothing is pending. It is stored rather than held in an
+    in-process timer so a restart cannot drop a pending check-in.
     """
 
     __tablename__ = "registrations"
 
     id = Column(Integer, primary_key=True, index=True)
     phone_number = Column(String(20), unique=True, index=True, nullable=False)
-    reg_stage = Column(String(30), default="awaiting_name", nullable=False)
+    reg_stage = Column(String(30), default="link_sent", nullable=False)
     reg_name = Column(String(255), nullable=True)
     reg_email = Column(String(255), nullable=True)
+    followup_due_at = Column(DateTime, nullable=True, index=True)
+    followup_count = Column(Integer, default=0, nullable=False, server_default="0")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     def __repr__(self) -> str:

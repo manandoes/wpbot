@@ -4,19 +4,21 @@ Manages per-contact conversation state and orchestrates Gemini replies.
 """
 
 import logging
-import threading
 from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from db import SessionLocal
-from db.models import Contact, Conversation, Registration
+from db.models import Contact, Registration
 from bot import gemini_agent
+from bot import registration
 from bot import whatsapp_web as whatsapp
+from bot.history import load_history, save_message
+from bot.locks import lock_for
 
 logger = logging.getLogger(__name__)
 
-ADMIN_PHONE = "919528913869"
+ADMIN_PHONE = registration.ADMIN_PHONE
 
 _DONE_SIGNAL = "[DONE]"
 _BOOKING_SIGNAL = "[BOOKING_CONFIRMED]"
@@ -38,110 +40,6 @@ def _get_or_create_contact(db: Session, phone_number: str) -> Contact:
     return contact
 
 
-def _load_history(db: Session, phone_number: str) -> list:
-    """Load the last 20 conversation rows for a phone number, ordered by timestamp."""
-    rows = (
-        db.query(Conversation)
-        .filter(Conversation.phone_number == phone_number)
-        .order_by(Conversation.timestamp.desc())
-        .limit(20)
-        .all()
-    )
-    rows.reverse()
-    return [{"role": row.role, "message": row.message} for row in rows]
-
-
-def _save_message(db: Session, phone_number: str, role: str, message: str) -> None:
-    """Persist a single message to the Conversation table."""
-    entry = Conversation(
-        phone_number=phone_number,
-        role=role,
-        message=message,
-        timestamp=datetime.utcnow(),
-    )
-    db.add(entry)
-    db.commit()
-
-
-# ---------------------------------------------------------------------------
-# Registration form (deterministic — no AI)
-# ---------------------------------------------------------------------------
-
-def _notify_admin(reg: Registration) -> None:
-    """Send a text summary of the new registration to the admin number."""
-    text = (
-        f"🎉 New Masterclass Registration!\n\n"
-        f"📱 Phone: +{reg.phone_number}\n"
-        f"👤 Name: {reg.reg_name}\n"
-        f"📧 Email: {reg.reg_email}"
-    )
-    whatsapp.send_message(ADMIN_PHONE, text)
-
-
-def _handle_registration_step(
-    db: Session,
-    contact: Contact,
-    reg: Registration,
-    incoming_text: str,
-    has_media: bool,
-    media_data: str,
-    media_mimetype: str,
-) -> None:
-    """
-    Deterministic registration form.  Advances through stages:
-      awaiting_name → awaiting_email → awaiting_payment → complete
-    """
-    phone_number = contact.phone_number
-
-    if reg.reg_stage == "awaiting_name":
-        if not incoming_text:
-            whatsapp.send_message(phone_number, "Bhai naam toh bata! 😄 What's your full name?")
-            return
-        reg.reg_name = incoming_text.strip()
-        reg.reg_stage = "awaiting_email"
-        db.commit()
-        whatsapp.send_message(phone_number, "Got it! 🙌 What's your email address?")
-
-    elif reg.reg_stage == "awaiting_email":
-        if not incoming_text:
-            whatsapp.send_message(phone_number, "Email address please? 😊")
-            return
-        reg.reg_email = incoming_text.strip()
-        reg.reg_stage = "awaiting_payment"
-        db.commit()
-        whatsapp.send_message(
-            phone_number,
-            "Perfect! Last step — please send a screenshot of your payment confirmation 📸",
-        )
-
-    elif reg.reg_stage == "awaiting_payment":
-        if not has_media:
-            whatsapp.send_message(
-                phone_number,
-                "I need the payment screenshot 📸 Please send the image (not text)!",
-            )
-            return
-        # Forward details + screenshot to admin
-        _notify_admin(reg)
-        whatsapp.send_media_base64(
-            ADMIN_PHONE,
-            media_data,
-            media_mimetype,
-            caption=f"Payment screenshot from +{reg.phone_number} ({reg.reg_name})",
-            filename="payment_screenshot.jpg",
-        )
-        # Complete registration
-        reg.reg_stage = "complete"
-        contact.status = "booked"
-        contact.last_contacted_at = datetime.utcnow()
-        db.commit()
-        whatsapp.send_message(
-            phone_number,
-            "Thank you. We have received your payment screenshot and will verify it shortly. You will be added to the community once confirmed.",
-        )
-        logger.info("Registration complete for %s (%s, %s)", phone_number, reg.reg_name, reg.reg_email)
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -150,14 +48,8 @@ def _handle_registration_step(
 # the same contact arriving together are handled concurrently: both would read
 # the history before either saved its reply, and the contact would receive two
 # overlapping answers at once. One lock per number serialises them, so the
-# second message is answered in the light of the first exchange.
-_contact_locks: dict = {}
-_locks_guard = threading.Lock()
-
-
-def _lock_for(phone_number: str) -> threading.Lock:
-    with _locks_guard:
-        return _contact_locks.setdefault(phone_number, threading.Lock())
+# second message is answered in the light of the first exchange. The same lock
+# is taken by the registration check-in job — see bot/locks.py.
 
 
 def handle_message(
@@ -172,9 +64,9 @@ def handle_message(
     Routes to the registration form if a booking is in progress,
     otherwise runs the normal Gemini AI conversation.
 
-    Serialised per contact — see _lock_for.
+    Serialised per contact — see bot/locks.py.
     """
-    with _lock_for(phone_number):
+    with lock_for(phone_number):
         _handle_message(phone_number, incoming_text, has_media, media_data, media_mimetype)
 
 
@@ -190,21 +82,29 @@ def _handle_message(
         # ── Contact record ─────────────────────────────────────────────────
         contact = _get_or_create_contact(db, phone_number)
 
+        # Read the transcript before the new message joins it — Gemini is given
+        # the incoming text separately, so a history containing it too would
+        # replay the turn twice.
+        history = load_history(db, phone_number)
+
+        if incoming_text:
+            save_message(db, phone_number, role="user", message=incoming_text)
+
         # ── Registration flow takes priority ──────────────────────────────
+        # It claims only the messages it can act on; a question asked while the
+        # form is open falls through to the AI so the contact still gets an
+        # answer, and the form picks up again on their next clear reply.
         reg = db.query(Registration).filter(Registration.phone_number == phone_number).first()
-        if reg and reg.reg_stage != "complete":
-            _handle_registration_step(db, contact, reg, incoming_text, has_media, media_data, media_mimetype)
+        if reg and registration.handle_message(
+            db, contact, reg, incoming_text, has_media, media_data, media_mimetype
+        ):
             return
 
         # ── Normal AI conversation flow ────────────────────────────────────
-        history = _load_history(db, phone_number)
-
-        # Only save / reply if there's text (media without text during AI phase is ignored)
+        # Media without text is ignored here — only the registration form has
+        # anything to do with an image.
         if not incoming_text:
             return
-
-        # ── Persist incoming message ───────────────────────────────────────
-        _save_message(db, phone_number, role="user", message=incoming_text)
 
         # ── Generate Gemini reply ──────────────────────────────────────────
         reply = gemini_agent.get_reply(history, incoming_text, contact_status=contact.status)
@@ -216,7 +116,7 @@ def _handle_message(
         reply = reply.replace(_DONE_SIGNAL, "").replace(_BOOKING_SIGNAL, "").strip()
 
         # ── Persist bot reply ──────────────────────────────────────────────
-        _save_message(db, phone_number, role="model", message=reply)
+        save_message(db, phone_number, role="model", message=reply)
 
         # ── Update contact status ──────────────────────────────────────────
         if mark_not_interested:
@@ -237,18 +137,10 @@ def _handle_message(
         whatsapp.send_message(phone_number, reply)
 
         # ── Start registration flow if user just confirmed booking ─────────
+        # registration.start() is a no-op when one is already open, so a second
+        # [BOOKING_CONFIRMED] cannot restart the form or reset the check-in.
         if booking_confirmed:
-            existing_reg = db.query(Registration).filter(Registration.phone_number == phone_number).first()
-            if not existing_reg:
-                new_reg = Registration(phone_number=phone_number, reg_stage="awaiting_name")
-                db.add(new_reg)
-                db.commit()
-                whatsapp.send_message(
-                    phone_number,
-                    "Yayyy, welcome to the masterclass family! 🎉 "
-                    "Quick thing — what's your full name? (Needed for the group invite)",
-                )
-                logger.info("Registration flow started for %s", phone_number)
+            registration.start(db, contact)
 
     except Exception as exc:
         logger.exception("Error in handle_message for %s: %s", phone_number, exc)

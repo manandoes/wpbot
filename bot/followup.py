@@ -12,11 +12,17 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from db import SessionLocal
 from db.models import Contact
+from bot import registration
 from bot.whatsapp_web import send_message
 
 logger = logging.getLogger(__name__)
 
 FOLLOW_UP_DELAY_HOURS = 24
+
+# The registration check-in is due 5 minutes after the link goes out, so the
+# sweep has to run far more often than the daily job. It is a single indexed
+# query that returns nothing almost every time.
+REGISTRATION_SWEEP_SECONDS = 30
 
 # Sent to contacts who never replied to the first message
 FOLLOW_UP_TEMPLATE = (
@@ -157,9 +163,21 @@ def start_scheduler() -> None:
         name="Send 24-hour follow-ups",
         replace_existing=True,
     )
+    # coalesce + max_instances=1: if the process was busy or asleep, a backlog
+    # of missed sweeps must not fire as a burst of duplicate check-ins.
+    _scheduler.add_job(
+        func=registration.send_due_followups,
+        trigger=IntervalTrigger(seconds=REGISTRATION_SWEEP_SECONDS),
+        id="registration_checkin_job",
+        name="Send registration check-ins",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+    )
     _scheduler.start()
     logger.info(
-        "Follow-up scheduler started — running every %d hours.", FOLLOW_UP_DELAY_HOURS
+        "Scheduler started — 24-hour follow-ups, registration check-ins every %ds.",
+        REGISTRATION_SWEEP_SECONDS,
     )
 
 

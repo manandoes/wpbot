@@ -65,12 +65,14 @@ def _next_sunday_label() -> str:
 
 _SIGNAL_RULES = """
 ## Confirming Booking
-When the user explicitly confirms they want to join / book / register (e.g. "yes", "I'll book", "send the link", "interested", "let's do it", "register now") — share the registration link AND add [BOOKING_CONFIRMED] on its own line at the very end.
+When the user explicitly confirms they want to join / book / register (e.g. "yes", "I'll book", "send the link", "interested", "let's do it", "register now") — reply with ONE short warm line and add [BOOKING_CONFIRMED] on its own line at the very end.
 Example:
-  "Here it is: https://coachyogeshvats.com/2-hours-live-masterclass/
+  "Brilliant, you're going to love this one 🙌
   [BOOKING_CONFIRMED]"
+- Do NOT paste the registration link in that message. The system sends a thank-you with the link immediately afterwards, and two links in a row looks broken.
 - Output [BOOKING_CONFIRMED] only ONCE — when the user first confirms purchase intent.
 - Do NOT output it again even if the user asks for the link a second time.
+- Once [BOOKING_CONFIRMED] has been sent, the system takes over collecting their registration details. Answer their questions normally and leave the link, the payment and the confirmation to it.
 
 ## Ending the Conversation
 ONLY end the conversation when the user has said NO explicitly at least TWICE using clear language such as "not interested", "please stop", "don't contact me", "I don't want this".
