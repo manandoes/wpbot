@@ -222,6 +222,10 @@ const SEND_ATTEMPTS = 3;
 // send actually went out. Comfortably longer than the retry backoff.
 const DUPLICATE_WINDOW_SECONDS = 120;
 
+// How long to let a send settle into the chat history before asking WhatsApp
+// whether it actually landed.
+const DELIVERY_SETTLE_MS = 1500;
+
 const TRANSIENT_ERRORS = [
   'Execution context was destroyed',
   'Target closed',
@@ -320,11 +324,19 @@ async function toPhoneNumber(address, contact) {
   const cached = phoneByAddress.get(raw);
   if (cached) return cached;
 
-  // contact.number is already the phone number whenever WhatsApp knows it.
-  const fromContact = digitsOnly(contact && contact.number);
-  if (fromContact) {
-    remember(raw, fromContact);
-    return fromContact;
+  // contact.id is the authoritative field: whatsapp-web.js rewrites it to the
+  // phone address whenever WhatsApp knows the number behind a LID. contact.number
+  // is *not* rewritten - for a LID contact it holds the LID's own digits, which
+  // are indistinguishable from a phone number once the '@lid' is stripped. That
+  // is how cold inbound contacts ended up filed under unreachable 15-digit ids
+  // and never got a reply, so read the id and refuse anything still a LID.
+  const idAddress = String((contact && contact.id && contact.id._serialized) || '');
+  if (idAddress && !idAddress.endsWith('@lid')) {
+    const fromId = digitsOnly(idAddress.split('@')[0]);
+    if (fromId) {
+      remember(raw, fromId);
+      return fromId;
+    }
   }
 
   try {
@@ -342,51 +354,107 @@ async function toPhoneNumber(address, contact) {
   return null;
 }
 
-// The chat addresses to try for a mobile number, best first. The '@c.us' form
-// is the real identity; the LID is only a transport address, used when the
-// conversation happens to be keyed under it (which is the case for anyone who
-// messaged us first). It never leaves this process.
-async function chatAddresses(phoneNumber) {
+// The one address WhatsApp keys this contact's conversation under.
+//
+// A contact has two addresses - their phone ('<number>@c.us') and their LID
+// ('<opaque>@lid') - but only ever one chat, which may be stored under either.
+// Guessing wrong and falling through to the other address is what posted every
+// message twice, so ask WhatsApp which chat it actually has and send there once.
+// The LID never leaves this process.
+async function chatAddressFor(phoneNumber) {
   const phone = digitsOnly(phoneNumber);
   if (!phone) throw new Error(`CHAT_UNRESOLVED: '${phoneNumber}' is not a phone number`);
 
   const primary = `${phone}@c.us`;
+
   const cached = lidByPhone.get(phone);
-  if (cached) return [primary, cached];
+  if (cached) return cached;
 
   try {
     await waitForReady();
     const [mapping] = await client.getContactLidAndPhone([primary]);
     const lid = mapping && mapping.lid;
     if (lid) {
+      // WhatsApp has a LID for this contact, which means the conversation is
+      // filed under it - sending to the phone address resolves no chat at all.
       remember(lid, phone);
-      return [primary, lid];
+      return lid;
     }
   } catch (error) {
     console.warn(`⚠️  Could not look up the chat address for ${phone}: ${error.message}`);
   }
 
-  return [primary];
+  // No LID: an ordinary contact whose chat is keyed by their number.
+  return primary;
 }
 
-// A transient failure does not tell us whether the message left before the
-// page died - whatsapp-web.js throws while reading the result back, which is
-// after WhatsApp has already accepted it. Ask WhatsApp instead: if an
-// identical outgoing message is sitting in the chat, the send did land, and
-// retrying would post it a second time.
+// Every address the same conversation may be filed under. Used only to check
+// whether a message landed - never to send to more than one of them.
+function knownAddresses(phoneNumber) {
+  const phone = digitsOnly(phoneNumber);
+  const addresses = [`${phone}@c.us`];
+  const lid = lidByPhone.get(phone);
+  if (lid) addresses.push(lid);
+  return addresses;
+}
+
+// Whether an identical outgoing message is already sitting in a chat.
+//
+// Neither an empty send result nor a transient failure tells us whether the
+// message left: whatsapp-web.js reads the sent message back out of WhatsApp's
+// store by a key it builds itself, and comes up empty for a LID-addressed chat
+// even though the send was accepted. So ask WhatsApp what is actually in the
+// chat - a copy sitting there means resending would post it twice.
+//
+// This reads the message store directly rather than going through
+// Client#getChatById, because building a Chat model throws on exactly the
+// LID-addressed chats this check exists for.
 async function findRecentlySent(chatId, content, options) {
   const body = typeof content === 'string' ? content : (options && options.caption) || '';
   if (!body) return null; // media with no caption - nothing to match on
 
+  const cutoff = Math.floor(Date.now() / 1000) - DUPLICATE_WINDOW_SECONDS;
+
   try {
-    const chat = await client.getChatById(chatId);
-    const recent = await chat.fetchMessages({ limit: 10 });
-    const cutoff = Math.floor(Date.now() / 1000) - DUPLICATE_WINDOW_SECONDS;
-    return recent.find((m) => m.fromMe && m.timestamp >= cutoff && m.body === body) || null;
+    return await client.pupPage.evaluate(
+      (chatId, body, cutoff) => {
+        const Msg = window.require('WAWebCollections').Msg;
+        const all = Msg.getModelsArray ? Msg.getModelsArray() : Array.from(Msg.models || []);
+        const hit = all.find(
+          (m) =>
+            m.id &&
+            m.id.fromMe &&
+            m.id.remote &&
+            m.id.remote._serialized === chatId &&
+            m.t >= cutoff &&
+            m.body === body
+        );
+        // MsgKey exposes no _serialized on every build; toString() always
+        // yields the serialized form.
+        return hit ? { id: { _serialized: String(hit.id), id: hit.id.id } } : null;
+      },
+      chatId,
+      body,
+      cutoff
+    );
   } catch (error) {
-    console.warn(`Could not check ${chatId} for an already-sent copy: ${error.message}`);
+    console.warn(`⚠️  Could not check ${chatId} for an already-sent copy: ${error.message}`);
     return null;
   }
+}
+
+// Whether an identical message is already sitting in any of a contact's chats.
+// The candidate addresses are two views of one conversation, so a copy under
+// either of them means the send landed.
+async function confirmDelivered(chatIds, content, options) {
+  // A just-sent message takes a moment to show up in the chat's history.
+  await new Promise((r) => setTimeout(r, DELIVERY_SETTLE_MS));
+
+  for (const chatId of chatIds) {
+    const found = await findRecentlySent(chatId, content, options);
+    if (found) return found;
+  }
+  return null;
 }
 
 async function sendWithRetry(chatId, content, options) {
@@ -404,19 +472,15 @@ async function sendWithRetry(chatId, content, options) {
     }
 
     try {
-      const sent = options
+      // May resolve with undefined, which is ambiguous: either no chat could be
+      // opened and nothing was sent, or the send did go out and whatsapp-web.js
+      // could not read the stored message back (it looks the sent message up by
+      // a key it builds itself, which WhatsApp does not always file it under).
+      // Only the caller can tell those apart, so hand the empty result up
+      // instead of guessing here.
+      return options
         ? await client.sendMessage(chatId, content, options)
         : await client.sendMessage(chatId, content);
-
-      // whatsapp-web.js resolves with undefined (no throw) when it cannot open
-      // the chat — number not on WhatsApp, or an address with no chat behind it.
-      // Nothing was sent, so surface it as an error instead of crashing on
-      // result.id.
-      if (!sent) {
-        throw new Error(`CHAT_UNRESOLVED: WhatsApp could not open a chat for ${chatId}`);
-      }
-
-      return sent;
     } catch (error) {
       lastError = error;
       if (!isTransient(error)) throw error;
@@ -432,22 +496,27 @@ async function sendWithRetry(chatId, content, options) {
   throw lastError;
 }
 
-// Send to a contact, identified by their mobile number. A CHAT_UNRESOLVED on
-// the phone address just means the chat is keyed by the LID instead, so fall
-// through to it; any other failure (and the last CHAT_UNRESOLVED) propagates.
+// Send to a contact, identified by their mobile number.
+//
+// Exactly one send goes out. The old code tried the phone address and then fell
+// through to the LID whenever the first send came back empty - but an empty
+// result does not mean nothing was sent, so that fallthrough posted a second
+// copy of a message the contact had already received. The chat is now resolved
+// up front, and an empty result is checked against WhatsApp's own history
+// rather than assumed to be a failure.
 async function sendToContact(phoneNumber, content, options) {
   const phone = digitsOnly(phoneNumber);
-  const candidates = await chatAddresses(phoneNumber);
+  const chatId = await chatAddressFor(phoneNumber);
 
   console.log(`📤 Sending message to ${phone}`);
 
-  for (const chatId of candidates) {
-    try {
-      return await sendWithRetry(chatId, content, options);
-    } catch (error) {
-      if (!error.message.startsWith('CHAT_UNRESOLVED')) throw error;
-      console.warn(`⚠️  No chat keyed by ${chatId}; trying the next address.`);
-    }
+  const sent = await sendWithRetry(chatId, content, options);
+  if (sent) return sent;
+
+  const delivered = await confirmDelivered(knownAddresses(phone), content, options);
+  if (delivered) {
+    console.log(`Message to ${phone} landed despite an empty send result - not resending.`);
+    return delivered;
   }
 
   // Report the failure against the number, never against an internal address.
